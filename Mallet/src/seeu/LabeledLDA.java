@@ -7,8 +7,10 @@
 
 package seeu;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Hashtable;
+import java.util.TreeSet;
 import java.io.*;
 
 import cc.mallet.types.*;
@@ -30,8 +32,7 @@ public class LabeledLDA implements Serializable {
 	double beta;   // Prior on per-topic multinomial distribution over words
 	double tAlpha;
 	double vBeta;
-	InstanceList ilist;  // the data field of the instances is expected to hold a FeatureSequence
-	InstanceList llist;  // the data field of the instances is expected to hold a label list
+	InstanceList ilist;  // the data field of the instances is expected to hold a FeatureSequence		
 	
 	Alphabet text_vocabulary = null;
 	Alphabet label_vocabulary = null;
@@ -52,9 +53,7 @@ public class LabeledLDA implements Serializable {
 	int[] tokensPerTopic; // indexed by <topic index>	
 	
 	int [][] docLabels;//indexed by <document index, label index>		
-	int numLabels;//total number of **unique** labels
-	Hashtable<Integer, String> id2labels = new Hashtable<Integer, String>();			
-	
+	int numLabels;//total number of **unique** labels	
 	
 	//
 	//variables for testing
@@ -88,8 +87,46 @@ public class LabeledLDA implements Serializable {
 		this.alpha = alphaSum / numTopics;
 		this.beta = beta;
 	}
-
-	public void init (InstanceList documents, InstanceList labels, Randoms r)
+	
+	public void readLabels(String fname) throws IOException
+	{
+		//get number of lines
+		BufferedReader br = new BufferedReader (new FileReader(fname));
+		String line = "";
+		numLabelDocs = 0;
+		while((line = br.readLine()) != null)
+		{
+			numLabelDocs++;			
+		}
+		br.close();
+		
+		docLabels = new int [numLabelDocs][];
+		
+		TreeSet<Integer> all_labels = new TreeSet<Integer>(); 
+		//read data
+		br = new BufferedReader (new FileReader(fname));		
+		int index = 0;
+		while((line = br.readLine()) != null)
+		{
+			String [] labels = line.split(" ");
+			int did = Integer.parseInt(labels[0]);
+			int num_label = Integer.parseInt(labels[1]);
+			
+			docLabels[index] = new int[num_label];
+			for(int i=2;i<labels.length;i++)
+			{
+				int l = Integer.parseInt(labels[i]);
+				docLabels[index][i-2] = l;
+				all_labels.add(l);
+			}
+			index++;
+		}
+		br.close();
+		
+		numLabels = all_labels.size();
+	}
+	
+	public void init (InstanceList documents, String labelFname, Randoms r) throws IOException
 	{
 		ilist = documents.shallowClone();
 		numTypes = ilist.getDataAlphabet().size ();//get vocabulary size
@@ -98,9 +135,8 @@ public class LabeledLDA implements Serializable {
 		//get vocabulary
 		text_vocabulary = ilist.getDataAlphabet();
 		
-		llist = labels.shallowClone();
-		numLabels = llist.getDataAlphabet().size();//get label vocabulary
-		numLabelDocs =llist.size();
+		//read all labels
+		readLabels(labelFname);		
 		
 		if(numDocs != numLabelDocs)
 			System.out.println("Numer of documents and number of labels do not match");
@@ -112,28 +148,6 @@ public class LabeledLDA implements Serializable {
 		alpha = (double)50 / numTopics;
 		beta = 0.1;
 		
-		//read all labels
-		docLabels = new int [numDocs][];
-		//get all labels
-		FeatureSequence FSlabels;
-		for(int di=0;di<numDocs;di++)
-		{
-			try {
-				FSlabels = (FeatureSequence) llist.get(di).getData();
-		      } catch (ClassCastException e) {
-		        System.err.println ("LDA and other topic models expect FeatureSequence data, not FeatureVector data.  "
-		                            +"With text2vectors, you can obtain such data with --keep-sequence or --keep-bisequence.");
-		        throw e;
-		      }
-			int numLabel = FSlabels.getLength();			
-			docLabels[di] = new int[numLabel];
-			// Randomly assign tokens to topics
-			for (int si = 0; si < numLabel; si++) {
-				docLabels[di][si] = FSlabels.getIndexAtPosition(si);
-				id2labels.put(docLabels[di][si], (String)llist.getDataAlphabet().lookupObject(docLabels[di][si]));
-			}
-		}
-				
 		topics = new int[numDocs][];
 		docTopicCounts = new int[numDocs][numTopics];
 		typeTopicCounts = new int[numTypes][numTopics];
@@ -741,18 +755,7 @@ public class LabeledLDA implements Serializable {
 			  pw.print(topics[di][si]); pw.println();
 		  }
 	  }
-  }
-
-  
-  public void writeLabelMap(String fname) throws IOException
-  {
-	  PrintWriter pw = new PrintWriter (new FileWriter(fname));
-	  for (Integer key: id2labels.keySet()) {
-		    pw.println(key + " " + id2labels.get(key));		     
-		  }	
-	  pw.flush();
-	  pw.close();
-  }
+  }  
   
   public void write (File f) {
     try {
@@ -849,12 +852,6 @@ public class LabeledLDA implements Serializable {
 		text_vocabulary = (Alphabet) in.readObject ();
 	}
 	
-	public void writeLabelVocabulary(ObjectOutputStream out) throws IOException 
-	{
-		//write label vocabulary
-		out.writeObject (llist.getDataAlphabet());
-	}
-	
 	public void readLabelVocabulary(ObjectInputStream in) throws IOException, ClassNotFoundException 
 	{
 		//read label vocabulary
@@ -865,16 +862,16 @@ public class LabeledLDA implements Serializable {
 	public static void main (String[] args) throws IOException, ClassNotFoundException
 	{
 		args = new String [15];		
-		args[0] = "train";
+		args[0] = "test";
 		//args[0] = "test";
 		//training and testing files
-		args[1] =  "E:/dataset/20news/20_news_mallet_train/20_news_mallet_train_text.mallet";
-		args[2] =  "E:/dataset/20news/20_news_mallet_train/20_news_mallet_train_label.mallet";
-		args[3] =  "E:/dataset/20news/20_news_mallet_test/20_news_mallet_test_text.mallet";
+		args[1] =  "/media/DataVolume1/datasets/20news/new_dataset/5_folds/20_news_0_fold_mallet_train_text.mallet";
+		args[2] =  "/media/DataVolume1/datasets/20news/new_dataset/5_folds/20_news_0_fold_train_labels";
+		args[3] =  "/media/DataVolume1/datasets/20news/new_dataset/5_folds/20_news_0_fold_mallet_test_text.mallet";
 		//output folder
-		args[4] =  "D:/mallet-2.0.7/workspace/20_news";
+		args[4] =  "/media/DataVolume1/py_code_topic_modeling/20_news";
 		//iteration and top words
-		args[5] = "500";
+		args[5] = "100";
 		args[6] = "100";
 		//training model
 		args[7] = args[4] + "/train_model_raw_parameters.model";
@@ -905,25 +902,21 @@ public class LabeledLDA implements Serializable {
 		if(mode.equalsIgnoreCase("train"))
 		{
 			InstanceList ilist = InstanceList.load (new File(train_text_fname));//documents
-			InstanceList llist = InstanceList.load (new File(train_label_fname));//labels
-									
+			
 			System.out.println ("Data loaded.");
 			
 			System.out.println ("Start training...");
 			
 			LabeledLDA lda = new LabeledLDA ();
 			
-			lda.init (ilist, llist, new Randoms());
+			lda.init (ilist, train_label_fname, new Randoms());
 			
 			lda.estimate(0, ilist.size(), numIterations, 50, 0, null, new Randoms());
 			
 			lda.writeTopWords (topword_fname, numTopWords, true);
 			
 			lda.writeTopicsAtPositionInDocuments(lda.topics, topic_position_fname);
-			
-			//write topic to label map
-			lda.writeLabelMap(topic_to_label_map_fname);
-			
+					
 			//write model parameters
 			ObjectOutputStream oos = new ObjectOutputStream (new FileOutputStream (model_fname));
 			lda.writeModel(oos);
@@ -933,11 +926,6 @@ public class LabeledLDA implements Serializable {
 			ObjectOutputStream oos_text = new ObjectOutputStream (new FileOutputStream (text_vocabulary_fname));
 			lda.writeTextVocabulary(oos_text);
 			oos_text.close();
-			
-			//write label vocabulary
-			ObjectOutputStream oos_label = new ObjectOutputStream (new FileOutputStream (label_vocabulary_fname));
-			lda.writeLabelVocabulary(oos_label);
-			oos_label.close();
 		}
 		else if(mode.equalsIgnoreCase("test"))
 		{
@@ -965,74 +953,7 @@ public class LabeledLDA implements Serializable {
 			
 			//write topicd predicted for documents
 			lda.writeDocumentTopics (test_topic_document_fname, lda.test_topics, lda.test_docTopicCounts, 0.0, -1);
-		}
-		
-		/*
-		ObjectInputStream ois = new ObjectInputStream (new FileInputStream(model_fname));
-        lda.readModel(ois);
-		ois.close();
-		
-		LabeledLDA lda2 = new LabeledLDA ();
-		ObjectInputStream ois2 = new ObjectInputStream (new FileInputStream(args[5]));
-        lda2.readModel(ois2);
-		ois2.close();
-		
-		if(lda.numDocs != lda2.numDocs)
-			System.out.println("bad");
-		
-		//write assigned topic at each word position
-		for (int di = 0; di < lda.numDocs; di ++)
-		{			
-			for (int si = 0; si < lda.topics[di].length; si++)
-				if(lda.topics[di][si] != lda2.topics[di][si])
-					System.out.println("bad");
-		}
-		//write topic count in each document
-		for (int di = 0; di < lda.numDocs; di ++)				
-			for (int ti = 0; ti < lda.numTopics; ti++)
-				if(lda.docTopicCounts[di][ti] != lda2.docTopicCounts[di][ti])
-					System.out.println("bad");
-					
-		//write word,topic count
-		for (int fi = 0; fi < lda.numTypes; fi++)
-			for (int ti = 0; ti < lda.numTopics; ti++)
-				if(lda.typeTopicCounts[fi][ti] != lda2.typeTopicCounts[fi][ti])
-					System.out.println("bad");
-				
-		//write number of tokens per topic
-		for (int ti = 0; ti < lda.numTopics; ti++)
-			if(lda.tokensPerTopic[ti] != lda2.tokensPerTopic[ti])
-				System.out.println("bad");
-		*/
-		
-		/*
-		FeatureSequence fs;
-		Labeling label;
-	    for (int di = 0; di < llist.size(); di++) {
-	      try {
-	        fs = (FeatureSequence) llist.get(di).getData();
-	        label = (Labeling) llist.get(di).getLabeling();	        
-	        
-	      } catch (ClassCastException e) {
-	        System.err.println ("LDA and other topic models expect FeatureSequence data, not FeatureVector data.  "
-	                            +"With text2vectors, you can obtain such data with --keep-sequence or --keep-bisequence.");
-	        throw e;
-	      }
-	      
-	      int seqLen = fs.getLength();
-	      for(int si=0;si<seqLen;si++)
-	      {
-	    	  int t = fs.getIndexAtPosition(si);
-	    	  System.out.println(di + " " + si + " " + t + " " + llist.getDataAlphabet().lookupObject(t));
-	    	  
-	      }
-	      
-	      System.out.println(label + " " );
-	    }
-	      
-	    System.out.println(llist.size());
-	    
-	    */
+		}		
 	}
 
 }
