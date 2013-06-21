@@ -1,0 +1,3 @@
+D1 LABEL The MALLET topic model package includes an extremely fast and highly scalable implementation of Gibbs sampling, efficient methods for document-topic hyperparameter optimization, and tools for inferring topics for new documents given trained models.
+D1 LABEL Importing Documents: Once MALLET has been downloaded and installed, the next step is to import text files into MALLET's internal format. The following instructions assume that the documents to be used as input to the topic model are in separate files, in a 
+D1 LABEL Building Topic Models: Once you have imported documents into MALLET format, you can use the train-topics command to build a topic model, for example:
