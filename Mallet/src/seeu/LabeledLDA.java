@@ -10,6 +10,7 @@ package seeu;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Hashtable;
+import java.util.Iterator;
 import java.util.TreeSet;
 import java.io.*;
 
@@ -106,6 +107,7 @@ public class LabeledLDA implements Serializable {
 		//read data
 		br = new BufferedReader (new FileReader(fname));		
 		int index = 0;
+		int max_label = -1;
 		while((line = br.readLine()) != null)
 		{
 			String [] labels = line.split(" ");
@@ -118,12 +120,21 @@ public class LabeledLDA implements Serializable {
 				int l = Integer.parseInt(labels[i]);
 				docLabels[index][i-2] = l;
 				all_labels.add(l);
+				if(l>max_label)
+					max_label = l;
 			}
 			index++;
 		}
 		br.close();
 		
-		numLabels = all_labels.size();
+		numLabels = max_label + 1;
+		System.out.println("The labels are:");
+		Iterator<Integer> it = all_labels.iterator();
+		while(it.hasNext()) {
+			Integer a = it.next();
+		    System.out.print(a + " ");		    
+		}
+		System.out.println("\nThe maximal label is:" + numLabels);
 	}
 	
 	public void init (InstanceList documents, String labelFname, Randoms r) throws IOException
@@ -143,6 +154,9 @@ public class LabeledLDA implements Serializable {
 		
 		//important!! reset the number of topics as the number of labels		
 		numTopics = numLabels;
+		
+		System.out.println("Set the total number of topics as the maximal label ID " + numTopics);
+		
 		
 		//decide alpha and beta
 		alpha = (double)50 / numTopics;
@@ -628,9 +642,10 @@ public class LabeledLDA implements Serializable {
 				wp[wi] = new WordProb (wi, ((double)typeTopicCounts[wi][ti]) / tokensPerTopic[ti]);
 			Arrays.sort (wp);
 			if (useNewLines) {
-				pw.println ("\nTopic "+ti);
+				pw.println ("Topic "+ti);
 				for (int i = 0; i < numWords; i++)
 					pw.println (ilist.getDataAlphabet().lookupObject(wp[i].wi).toString() + " " + wp[i].p);
+				pw.println("\n");
 			} else {
 				System.out.print ("Topic "+ti+": ");
 				for (int i = 0; i < numWords; i++)
@@ -703,8 +718,7 @@ public class LabeledLDA implements Serializable {
 
   public void writeDocumentTopics (String fname, int[][] topics, int[][] docTopicCounts, double threshold, int max) throws IOException
   {
-	PrintWriter pw = new PrintWriter(new FileWriter(fname));
-    pw.println ("#doc source topic proportion ...");
+	PrintWriter pw = new PrintWriter(new FileWriter(fname));    
     int docLen;
     double topicDist[] = new double[topics.length];
     for (int di = 0; di < topics.length; di++) {
@@ -858,49 +872,82 @@ public class LabeledLDA implements Serializable {
 		label_vocabulary = (Alphabet) in.readObject ();
 	}
 	
+	public static void printOption()
+	{
+		String options = "Usage: LabeledLDA [-mode <train|test>] [-train_text <train mallet file>]"
+				+ " [-train_label <train labels>] [-test_text <test text>] [-model_out_folder <folder name>] [-prediction_out_folder <folder name>]"
+				+ " [-iteration <number of iteration>] [-top_words <number of top words>]";
+	    System.err.println(options);
+	    return ;	   
+	}
+	
 	// Recommended to use mallet/bin/vectors2topics instead.
 	public static void main (String[] args) throws IOException, ClassNotFoundException
-	{
-		args = new String [15];		
-		args[0] = "test";
-		//args[0] = "test";
-		//training and testing files
-		args[1] =  "/media/DataVolume1/datasets/20news/new_dataset/5_folds/20_news_0_fold_mallet_train_text.mallet";
-		args[2] =  "/media/DataVolume1/datasets/20news/new_dataset/5_folds/20_news_0_fold_train_labels";
-		args[3] =  "/media/DataVolume1/datasets/20news/new_dataset/5_folds/20_news_0_fold_mallet_test_text.mallet";
-		//output folder
-		args[4] =  "/media/DataVolume1/py_code_topic_modeling/20_news";
-		//iteration and top words
-		args[5] = "100";
-		args[6] = "100";
-		//training model
-		args[7] = args[4] + "/train_model_raw_parameters.model";
-		args[8] = args[4] + "/train_model_text.vocabulary";
-		args[9] = args[4] + "/train_model_label.vocabulary";		
-		args[10] = args[4] + "/train_model_top_words.model";
-		args[11] = args[4] + "/train_model_topics_position.model";
-		args[12] = args[4] + "/train_model_topic_to_label_map.model";
-		//testing results
-		args[13] = args[4] + "/test_model_topics_position.test_model";
-		args[14] = args[4] + "/test_model_topic_per_document.test_model";
+	{		
+		String mode = "";
+		String train_text_fname = "";
+		String train_label_fname = "";
+		String test_text_fname = "";	
+		String model_out_folder = "";
+		String prediction_out_folder = "";
+		int numIterations = 1000;
+		int numTopWords = 20;		
 		
-		String mode = args[0];
-		String train_text_fname = args[1];
-		String train_label_fname = args[2];
-		String test_text_fname = args[3];		
-		int numIterations = args.length > 1 ? Integer.parseInt(args[5]) : 1000;
-		int numTopWords = args.length > 2 ? Integer.parseInt(args[6]) : 20;		
-		String model_fname = args[7];
-		String text_vocabulary_fname = args[8];
-		String label_vocabulary_fname = args[9];
-		String topword_fname = args[10];
-		String topic_position_fname = args[11];
-		String topic_to_label_map_fname = args[12];
-		String test_topic_position_fname = args[13];
-		String test_topic_document_fname = args[14];
+		String model_fname = "";
+		String text_vocabulary_fname = "";		
+		String topword_fname = "";
+		String topic_position_fname = "";		
+		String test_topic_position_fname = "";
+		String test_topic_document_fname = "";
 		
+		// TODO Auto-generated method stub
+		    for (int i = 0; i < args.length; i++) {
+		    	if (args[i].equals("-mode")) {
+		    		mode = args[++i];
+		      }else if (args[i].equals("-train_text")) {
+		    	  train_text_fname = args[++i];
+		      }		      
+		      else if (args[i].equals("-train_label")) {
+		    	  train_label_fname = args[++i];
+		      }
+		      else if (args[i].equals("-test_text")) {
+		    	  test_text_fname = args[++i];
+		      }
+		      else if (args[i].equals("-model_out_folder")) {
+		    	  model_out_folder = args[++i];
+		      }
+		      else if (args[i].equals("-prediction_out_folder")) {
+		    	  prediction_out_folder = args[++i];
+		      }
+		      else if (args[i].equals("-iteration")) {
+		    	  numIterations = Integer.parseInt(args[++i]);
+		      }
+		      else if (args[i].equals("-top_words")) {
+		    	  numTopWords = Integer.parseInt(args[++i]);
+		      }
+		    }		 		 		 						
+			
 		if(mode.equalsIgnoreCase("train"))
 		{
+			if(train_text_fname.equals("") || train_label_fname.equals(""))
+			{
+				System.err.println("train text (<-train_text> or <-train_label>) file not set");
+				 printOption();
+				 return;
+			}
+			
+			if(model_out_folder.equals(""))
+			{
+				 System.err.println("<-model_out_folder> not set");
+				 printOption();
+				 return;
+			}
+			
+			model_fname = model_out_folder + "/train_model_raw_parameters.model";
+			text_vocabulary_fname = model_out_folder + "/train_model_text.vocabulary";				
+			topword_fname = model_out_folder + "/train_model_top_words.model";//top k words for a topic and its probabilities
+			topic_position_fname = model_out_folder + "/train_model_topics_position.model";//one MCMC chain for the topic assignment at each word
+			
 			InstanceList ilist = InstanceList.load (new File(train_text_fname));//documents
 			
 			System.out.println ("Data loaded.");
@@ -929,6 +976,25 @@ public class LabeledLDA implements Serializable {
 		}
 		else if(mode.equalsIgnoreCase("test"))
 		{
+			if(test_text_fname.equals(""))
+			{
+				System.err.println("test text (-test_text) file not set");
+				 printOption();
+				 return;
+			}
+			
+			if(prediction_out_folder.equals(""))
+			{
+				 System.err.println("<-prediction_out_folder> not set");
+				 printOption();
+				 return;
+			}
+			
+			model_fname = model_out_folder + "/train_model_raw_parameters.model";
+			text_vocabulary_fname = model_out_folder + "/train_model_text.vocabulary";
+			test_topic_position_fname = prediction_out_folder + "/test_model_topics_position.test_model";//one MCMC chain for the topic assignment at each word
+			test_topic_document_fname =  prediction_out_folder + "/test_model_topic_per_document.test_model";//accumuate topic assignment for a document
+			
 			InstanceList test_ilist = InstanceList.load (new File(test_text_fname));//documents
 			
 			LabeledLDA lda = new LabeledLDA ();
