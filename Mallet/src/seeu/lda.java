@@ -40,6 +40,7 @@ public class lda {
 	// indexed by <topic index>
 	int[] tokensPerTopic; 
 	
+	int [][] topics;
 	
 	public void increaseCount(Hashtable<Integer, Integer> tb, int word_index)
 	{
