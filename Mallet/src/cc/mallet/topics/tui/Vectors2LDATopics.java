@@ -19,7 +19,7 @@ import java.io.*;
  *  @author <a href="mailto:mccallum@cs.umass.edu">Andrew McCallum</a>
  */
 
-public class Vectors2Topics {
+public class Vectors2LDATopics {
 
 	static CommandOption.String inputFile = new CommandOption.String
 		(Vectors2Topics.class, "input", "FILENAME", true, null,
