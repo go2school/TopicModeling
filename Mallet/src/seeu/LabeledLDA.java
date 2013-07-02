@@ -1019,7 +1019,12 @@ public class LabeledLDA implements Serializable {
 			
 			//write topicd predicted for documents
 			lda.writeDocumentTopics (test_topic_document_fname, lda.test_topics, lda.test_docTopicCounts, 0.0, -1);
-		}		
+		}
+		else
+		{
+			printOption();
+			 return;
+		}
 	}
 
 }

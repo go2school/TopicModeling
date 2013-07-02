@@ -55,7 +55,7 @@ public class LabeledHierarchicalLDA implements Serializable  {
 	//  (these could be shorts, or we could encode both in one int)
 	// indexed by <document index, sequence index>
 	// contains the topic path for the word position i in document d, i.e., <d, i>
-	int [][][] topics;	
+	int [][][] topics;
 	//wroking variables for a topic path
 	// Per-document state variables		
 	public int [][] docTopicCounts; //<document, topic>	
@@ -1267,131 +1267,154 @@ public class LabeledHierarchicalLDA implements Serializable  {
 			tokensPerTopic[ti] = in.readInt();				
 	}
 	
+	public static void printOption()
+	{
+		String options = "Usage: LabeledLDA [-mode <train|test>] [-train_text <train mallet file>]"
+				+ " [-train_label <train labels>] [-test_text <test text>] [-model_out_folder <folder name>] [-prediction_out_folder <folder name>]"
+				+ " [-iteration <number of iteration>] [-top_words <number of top words>]";
+	    System.err.println(options);
+	    return ;	   
+	}
+	
 	// Recommended to use mallet/bin/vectors2topics instead.
 	public static void main (String[] args) throws IOException, ClassNotFoundException
-	{
-		args = new String [15];
-		//args[0] = "/home/xiao/test_mallet/topic_input.mallet";
-		//args[0] = "/home/xiao/datasets/software/sourceforge/sourceforge_mallet.mallet";
-		//args[1] = "/home/xiao/workspace/test/sf_hier_par_child_pairs_first_level.txt";
-		//args[1] = "/home/xiao/workspace/test/sf_hier_par_child_pairs.txt";
-		//args[2] = "/home/xiao/datasets/software/sourceforge/sf_topics_id_string.txt";
-		//args[3] = "sourceforge";
-		//RCV1
-		args[0] = "/home/xiao/datasets/rcv1/mallet/lyrl2004_tokens_train.mallet.new.mallet";
-		args[1] = "/home/xiao/datasets/rcv1/mallet/rcv1_train_id_labels.txt.new";
-		args[2] = "/home/xiao/datasets/rcv1/mallet/rcv1_hierarchy.par_child";
-		//args[2] = "/home/xiao/datasets/rcv1/mallet/rcv1_flat_hierarchy.par_child";
-		args[3] = "/home/xiao/datasets/rcv1/mallet/rcv1_id2cat.map";		
-		args[4] = "/home/xiao/datasets/rcv1/mallet/rcv1_model.mallet";
-		args[5] = "rcv1";
-		args[6] = "10";
-		args[7] = "infer";
-		args[8] = "/home/xiao/workspace/test/rcv1/rcv1_inference";
-		args[9] = "0.25";	
-		args[10] = "topk";//threshold, maximal. topk
-		args[11] = "1";
-		args[12] = "/home/xiao/datasets/rcv1/mallet/rcv1_hierarchy.par_child";
-		//args[12] = "/home/xiao/datasets/rcv1/mallet/rcv1_flat_hierarchy.par_child";
-		args[13] = "no_prior";
+	{		
+		String mode = "";
+		String train_text_fname = "";
+		String train_label_fname = "";
+		String test_text_fname = "";	
+		String model_out_folder = "";
+		String prediction_out_folder = "";
+		int numIterations = 1000;
+		int numTopWords = 20;		
+		
+		String model_fname = "";
+		String text_vocabulary_fname = "";		
+		String topword_fname = "";
+		String topic_position_fname = "";		
+		String test_topic_position_fname = "";
+		String test_topic_document_fname = "";
+		
+		// TODO Auto-generated method stub
+		    for (int i = 0; i < args.length; i++) {
+		    	if (args[i].equals("-mode")) {
+		    		mode = args[++i];
+		      }else if (args[i].equals("-train_text")) {
+		    	  train_text_fname = args[++i];
+		      }		      
+		      else if (args[i].equals("-train_label")) {
+		    	  train_label_fname = args[++i];
+		      }
+		      else if (args[i].equals("-test_text")) {
+		    	  test_text_fname = args[++i];
+		      }
+		      else if (args[i].equals("-model_out_folder")) {
+		    	  model_out_folder = args[++i];
+		      }
+		      else if (args[i].equals("-prediction_out_folder")) {
+		    	  prediction_out_folder = args[++i];
+		      }
+		      else if (args[i].equals("-iteration")) {
+		    	  numIterations = Integer.parseInt(args[++i]);
+		      }
+		      else if (args[i].equals("-top_words")) {
+		    	  numTopWords = Integer.parseInt(args[++i]);
+		      }
+		    }		 		 		 						
 			
-		int numTopWords = 50;				
-		
-		double alphaSum = 50;				
-		
-		String instanceFname = args[0];
-		String labelFname = args[1];
-		String hierFname = args[2];
-		String topic2nameFname = args[3];
-		String finalModelFname = args[4];
-		String topTopicWordFname = "/home/xiao/workspace/test/"+args[5]+"/top_words";
-		int numIterations = Integer.parseInt(args[6]);
-		String inferFname = args[8];
-		String method = args[7];
-		double prediction_threshold = Double.parseDouble(args[9]);
-		String hardClassificationMethod = args[10];
-		int methodParameter = Integer.parseInt(args[11]);
-		int withPrior = (args[13].equalsIgnoreCase("prior"))?1:0;
-		String wordTopicFname = args[14];
-		//new topic hierarchy where some new nodes are added into the hierarchy
-		//String newhierFname = "/home/xiao/workspace/test/sf_hier_par_child_leaf_on_intermedia_pairs.txt";								
-				
-		if(method.equalsIgnoreCase("infer") == false)
+		if(mode.equalsIgnoreCase("train"))
 		{
-			LabeledHierarchicalLDA pam = new LabeledHierarchicalLDA ();
-			
-			pam.readID2name(topic2nameFname);
-					
-			pam.initTree(hierFname);
-			
-			pam.initAlpha(alphaSum);
-			
-			//pam.generateTreeWithLeafOnEachIntermediateNode(hierFname, newhierFname);
-			
-			pam.topTopicWordFname = topTopicWordFname;
-						
-			//read instances		
-			InstanceList ilist = InstanceList.load (new File(instanceFname));
-			//read instance labels
-			pam.readLabels(labelFname);
-			//estimate parameters
-			System.out.println ("Data loaded.");
-			pam.estimate (ilist, numIterations, 50, 10, 50, null, numTopWords, new Randoms());  // should be 1100		
-			
-			pam.printTrainTopicPathforEachWord(wordTopicFname + ".train");
-			
-			//pam SAVE object
-			try {
-	
-				ObjectOutputStream oos = 
-					new ObjectOutputStream(new FileOutputStream(finalModelFname));
-				oos.writeObject(pam);
-				oos.close();
-			} catch (Exception e) {
-				System.err.println(e.getMessage());
+			if(train_text_fname.equals("") || train_label_fname.equals(""))
+			{
+				System.err.println("train text (<-train_text> or <-train_label>) file not set");
+				 printOption();
+				 return;
 			}
+			
+			if(model_out_folder.equals(""))
+			{
+				 System.err.println("<-model_out_folder> not set");
+				 printOption();
+				 return;
+			}
+			
+			model_fname = model_out_folder + "/train_model_raw_parameters.model";
+			text_vocabulary_fname = model_out_folder + "/train_model_text.vocabulary";				
+			topword_fname = model_out_folder + "/train_model_top_words.model";//top k words for a topic and its probabilities
+			topic_position_fname = model_out_folder + "/train_model_topics_position.model";//one MCMC chain for the topic assignment at each word
+			
+			InstanceList ilist = InstanceList.load (new File(train_text_fname));//documents
+			
+			System.out.println ("Data loaded.");
+			
+			System.out.println ("Start training...");
+			
+			LabeledLDA lda = new LabeledLDA ();
+			
+			lda.init (ilist, train_label_fname, new Randoms());
+			
+			lda.estimate(0, ilist.size(), numIterations, 50, 0, null, new Randoms());
+			
+			lda.writeTopWords (topword_fname, numTopWords, true);
+			
+			lda.writeTopicsAtPositionInDocuments(lda.topics, topic_position_fname);
+					
+			//write model parameters
+			ObjectOutputStream oos = new ObjectOutputStream (new FileOutputStream (model_fname));
+			lda.writeModel(oos);
+			oos.close();
+			
+			//write text vocabulary
+			ObjectOutputStream oos_text = new ObjectOutputStream (new FileOutputStream (text_vocabulary_fname));
+			lda.writeTextVocabulary(oos_text);
+			oos_text.close();
 		}
-		else			
+		else if(mode.equalsIgnoreCase("test"))
 		{
-			/*
-			 * The test dataset does not need to have the same vocabulary as the training dataset			 
-			 */
+			if(test_text_fname.equals(""))
+			{
+				System.err.println("test text (-test_text) file not set");
+				 printOption();
+				 return;
+			}
 			
-			//build the hierarchy tree
-			TopicNode hierTree = new TopicNode();
-			hierTree = TopicNode.buildHierarchy(args[12]);
+			if(prediction_out_folder.equals(""))
+			{
+				 System.err.println("<-prediction_out_folder> not set");
+				 printOption();
+				 return;
+			}
 			
-			//read pam object		
-			LabeledHierarchicalLDA pui = null;
-	
-			ObjectInputStream ois = new ObjectInputStream (new FileInputStream(finalModelFname));
-			pui = (LabeledHierarchicalLDA) ois.readObject();
+			model_fname = model_out_folder + "/train_model_raw_parameters.model";
+			text_vocabulary_fname = model_out_folder + "/train_model_text.vocabulary";
+			test_topic_position_fname = prediction_out_folder + "/test_model_topics_position.test_model";//one MCMC chain for the topic assignment at each word
+			test_topic_document_fname =  prediction_out_folder + "/test_model_topic_per_document.test_model";//accumuate topic assignment for a document
+			
+			InstanceList test_ilist = InstanceList.load (new File(test_text_fname));//documents
+			
+			LabeledLDA lda = new LabeledLDA ();
+						
+			//read model
+			ObjectInputStream ois = new ObjectInputStream (new FileInputStream(model_fname));
+	        lda.readModel(ois);
 			ois.close();
 			
-			pui.readID2name(topic2nameFname);
+			lda.init_test(test_ilist, new Randoms());
 			
-			pui.initTree(hierFname);						
-				
-			pui.topTopicWordFname = topTopicWordFname;
+			//read text vocabulary			
+			ObjectInputStream ois2 = new ObjectInputStream (new FileInputStream(text_vocabulary_fname));
+	        lda.readTextVocabulary(ois2);
+			ois2.close();
+						
+	        //do inference on the test dataset
+	        lda.test(0, test_ilist.size(), numIterations, 50, new Randoms());
+	        
+	        //write results	        				
+			lda.writeTopicsAtPositionInDocuments(lda.test_topics, test_topic_position_fname);
 			
-			pui.setUpPredictionThreshold(prediction_threshold);
-			
-			//read instances		
-			InstanceList ilist = InstanceList.load (new File(instanceFname));
-			
-			pui.infer_topics(ilist, numIterations, 50, 10, 50, null, numTopWords, new Randoms());						
-			
-			//pui.printTrainTopicPathforEachWord(wordTopicFname + ".train");
-			pui.printTestTopicPathforEachWord(wordTopicFname + ".test");
-			
-			//output topics for each document
-			pui.computeTestDocumenTopicDistribution(withPrior, hierTree, pui.numDocs, pui.docTopicCounts);			
-			pui.outputHardClassification(hierTree, hardClassificationMethod, methodParameter, pui.numDocs, inferFname + ".train");
-			
-			//output topics for each document
-			pui.computeTestDocumenTopicDistribution(withPrior, hierTree, pui.test_numDocs, pui.test_docTopicCounts);			
-			pui.outputHardClassification(hierTree, hardClassificationMethod, methodParameter, pui.test_numDocs, inferFname + ".test");
-		}
+			//write topicd predicted for documents
+			lda.writeDocumentTopics (test_topic_document_fname, lda.test_topics, lda.test_docTopicCounts, 0.0, -1);
+		}		
 	}
 
 	class IDSorter implements Comparable {

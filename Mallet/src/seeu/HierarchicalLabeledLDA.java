@@ -899,79 +899,98 @@ public class HierarchicalLabeledLDA {
 		label_vocabulary = (Alphabet) in.readObject ();
 	}
 	
+	public static void printOption()
+	{
+		String options = "Usage: LabeledLDA [-mode <train|test>] [-train_text <train mallet file>]"
+				+ " [-train_label <train labels>] [-test_text <test text>] [-model_out_folder <folder name>] [-prediction_out_folder <folder name>]"
+				+ " [-iteration <number of iteration>] [-top_words <number of top words>]";
+	    System.err.println(options);
+	    return ;	   
+	}
+	
 	// Recommended to use mallet/bin/vectors2topics instead.
 	public static void main (String[] args) throws IOException, ClassNotFoundException
-	{
-		args = new String [15];		
-		args[0] = "train";
-		//args[0] = "test";
-		//training and testing files
-		args[1] =  "E:/dataset/20news/20_news_mallet_train/20_news_mallet_train_text.mallet";
-		args[2] =  "E:/dataset/20news/20_news_mallet_train/20_news_mallet_train_label.mallet";
-		args[3] =  "E:/dataset/20news/20_news_mallet_test/20_news_mallet_test_text.mallet";
-		//hierarchy
-		args[4] =  "";//hierarchy file
-		//output folder
-		args[5] =  "D:/mallet-2.0.7/workspace/20_news";
-		//iteration and top words
-		args[6] = "500";
-		args[7] = "100";
-		//training model
-		args[8] = args[5] + "/train_model_raw_parameters.model";
-		args[9] = args[5] + "/train_model_text.vocabulary";
-		args[10] = args[5] + "/train_model_label.vocabulary";		
-		args[11] = args[5] + "/train_model_top_words.model";
-		args[12] = args[5] + "/train_model_topics_position.model";
-		args[13] = args[5] + "/train_model_topic_to_label_map.model";
-		//testing results
-		args[14] = args[5] + "/test_model_topics_position.test_model";
-		args[15] = args[5] + "/test_model_topic_per_document.test_model";
+	{		
+		String mode = "";
+		String train_text_fname = "";
+		String train_label_fname = "";
+		String test_text_fname = "";	
+		String model_out_folder = "";
+		String prediction_out_folder = "";
+		int numIterations = 1000;
+		int numTopWords = 20;		
 		
-		String mode = args[0];
-		String train_text_fname = args[1];
-		String train_label_fname = args[2];
-		String test_text_fname = args[3];
-		String hier_fname = args[4];
-		int numIterations = args.length > 1 ? Integer.parseInt(args[6]) : 1000;
-		int numTopWords = args.length > 2 ? Integer.parseInt(args[7]) : 20;		
-		String model_fname = args[8];
-		String text_vocabulary_fname = args[9];
-		String label_vocabulary_fname = args[10];
-		String topword_fname = args[11];
-		String topic_position_fname = args[12];
-		String topic_to_label_map_fname = args[13];
-		String test_topic_position_fname = args[14];
-		String test_topic_document_fname = args[15];
+		String model_fname = "";
+		String text_vocabulary_fname = "";		
+		String topword_fname = "";
+		String topic_position_fname = "";		
+		String test_topic_position_fname = "";
+		String test_topic_document_fname = "";
 		
-		//read tree
-		Hierarchy hier = new Hierarchy();
-		hier.readTree_parent2child(hier_fname);
-		
+		// TODO Auto-generated method stub
+		    for (int i = 0; i < args.length; i++) {
+		    	if (args[i].equals("-mode")) {
+		    		mode = args[++i];
+		      }else if (args[i].equals("-train_text")) {
+		    	  train_text_fname = args[++i];
+		      }		      
+		      else if (args[i].equals("-train_label")) {
+		    	  train_label_fname = args[++i];
+		      }
+		      else if (args[i].equals("-test_text")) {
+		    	  test_text_fname = args[++i];
+		      }
+		      else if (args[i].equals("-model_out_folder")) {
+		    	  model_out_folder = args[++i];
+		      }
+		      else if (args[i].equals("-prediction_out_folder")) {
+		    	  prediction_out_folder = args[++i];
+		      }
+		      else if (args[i].equals("-iteration")) {
+		    	  numIterations = Integer.parseInt(args[++i]);
+		      }
+		      else if (args[i].equals("-top_words")) {
+		    	  numTopWords = Integer.parseInt(args[++i]);
+		      }
+		    }		 		 		 						
+			
 		if(mode.equalsIgnoreCase("train"))
 		{
+			if(train_text_fname.equals("") || train_label_fname.equals(""))
+			{
+				System.err.println("train text (<-train_text> or <-train_label>) file not set");
+				 printOption();
+				 return;
+			}
+			
+			if(model_out_folder.equals(""))
+			{
+				 System.err.println("<-model_out_folder> not set");
+				 printOption();
+				 return;
+			}
+			
+			model_fname = model_out_folder + "/train_model_raw_parameters.model";
+			text_vocabulary_fname = model_out_folder + "/train_model_text.vocabulary";				
+			topword_fname = model_out_folder + "/train_model_top_words.model";//top k words for a topic and its probabilities
+			topic_position_fname = model_out_folder + "/train_model_topics_position.model";//one MCMC chain for the topic assignment at each word
+			
 			InstanceList ilist = InstanceList.load (new File(train_text_fname));//documents
-			InstanceList llist = InstanceList.load (new File(train_label_fname));//labels
-									
+			
 			System.out.println ("Data loaded.");
 			
 			System.out.println ("Start training...");
 			
-			HierarchicalLabeledLDA lda = new HierarchicalLabeledLDA ();
+			LabeledLDA lda = new LabeledLDA ();
 			
-			//init tree
-			lda.init_hierarchy(hier);
-			
-			lda.init (ilist, llist, new Randoms());
+			lda.init (ilist, train_label_fname, new Randoms());
 			
 			lda.estimate(0, ilist.size(), numIterations, 50, 0, null, new Randoms());
 			
 			lda.writeTopWords (topword_fname, numTopWords, true);
 			
-			//lda.writeTopicsAtPositionInDocuments(lda.topics, topic_position_fname);
-			
-			//write topic to label map
-			lda.writeLabelMap(topic_to_label_map_fname);
-			
+			lda.writeTopicsAtPositionInDocuments(lda.topics, topic_position_fname);
+					
 			//write model parameters
 			ObjectOutputStream oos = new ObjectOutputStream (new FileOutputStream (model_fname));
 			lda.writeModel(oos);
@@ -981,17 +1000,31 @@ public class HierarchicalLabeledLDA {
 			ObjectOutputStream oos_text = new ObjectOutputStream (new FileOutputStream (text_vocabulary_fname));
 			lda.writeTextVocabulary(oos_text);
 			oos_text.close();
-			
-			//write label vocabulary
-			ObjectOutputStream oos_label = new ObjectOutputStream (new FileOutputStream (label_vocabulary_fname));
-			lda.writeLabelVocabulary(oos_label);
-			oos_label.close();
 		}
 		else if(mode.equalsIgnoreCase("test"))
 		{
+			if(test_text_fname.equals(""))
+			{
+				System.err.println("test text (-test_text) file not set");
+				 printOption();
+				 return;
+			}
+			
+			if(prediction_out_folder.equals(""))
+			{
+				 System.err.println("<-prediction_out_folder> not set");
+				 printOption();
+				 return;
+			}
+			
+			model_fname = model_out_folder + "/train_model_raw_parameters.model";
+			text_vocabulary_fname = model_out_folder + "/train_model_text.vocabulary";
+			test_topic_position_fname = prediction_out_folder + "/test_model_topics_position.test_model";//one MCMC chain for the topic assignment at each word
+			test_topic_document_fname =  prediction_out_folder + "/test_model_topic_per_document.test_model";//accumuate topic assignment for a document
+			
 			InstanceList test_ilist = InstanceList.load (new File(test_text_fname));//documents
 			
-			HierarchicalLabeledLDA lda = new HierarchicalLabeledLDA ();
+			LabeledLDA lda = new LabeledLDA ();
 						
 			//read model
 			ObjectInputStream ois = new ObjectInputStream (new FileInputStream(model_fname));
@@ -1013,8 +1046,6 @@ public class HierarchicalLabeledLDA {
 			
 			//write topicd predicted for documents
 			lda.writeDocumentTopics (test_topic_document_fname, lda.test_topics, lda.test_docTopicCounts, 0.0, -1);
-		}
-				
+		}		
 	}
-
 }

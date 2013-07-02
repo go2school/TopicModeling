@@ -12,8 +12,8 @@ import cc.mallet.util.Randoms;
 public class Hierarchy {
 
 	//use array for fast index and search
-	public int [][] parent2children; 
-	public int [] parents;
+	public int [][] parent2children; //<parent, <children>>
+	public int [] parents; // <parent>
 	public int root;
 	public int max_level;
 	public int num_nodes;
