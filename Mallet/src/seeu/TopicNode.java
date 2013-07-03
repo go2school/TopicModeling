@@ -33,7 +33,7 @@ public class TopicNode {
 	public int subTreeSize = -1;
 	public int height = 0;
 	
-	public static int maxNodes = 1000;
+	public static int maxNodes = 2000;
 	
 	//build tree from <par, child> pair file
 	public static TopicNode buildHierarchy(String parChildPairfile) throws IOException
@@ -43,10 +43,11 @@ public class TopicNode {
 		for(int i=0;i<tmp.length;i++)
 		{
 			tmp[i] = new TopicNode();
-			tmp[i].labelIndex = i;
+			tmp[i].labelIndex = i - 1;//we assume the root node has labeIndex -1
 		}
 		
 		//read <par, child> pair of nodes
+		//the root node in the parent child files must be integer 0
 		int par = 0, child = 0;
 		BufferedReader br = new BufferedReader(new FileReader(parChildPairfile));
 		String buffer = null;
@@ -101,6 +102,7 @@ public class TopicNode {
 		{								
 			subCounts = new int [numSubTopics];
 			subAlphas = new double [numSubTopics];
+			//divide the alpha for each internal node by number of children
 			Arrays.fill(subAlphas, alphaSum / numSubTopics);
 			for(int i=0;i<numSubTopics;i++)
 			{	

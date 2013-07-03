@@ -8,6 +8,7 @@ import cc.mallet.util.Randoms;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.TreeSet;
 import java.io.*;
 import java.text.NumberFormat;
@@ -29,6 +30,9 @@ public class LabeledHierarchicalLDA implements Serializable  {
 	public PrintWriter pw = null;
 	public String topTopicWordFname;
 	
+	Alphabet text_vocabulary = null;
+	Alphabet label_vocabulary = null;
+	
 	double [] alphas;
 	double alphaSum;
 	double beta;   // Prior on per-topic multinomial distribution over words
@@ -39,9 +43,12 @@ public class LabeledHierarchicalLDA implements Serializable  {
 	InstanceList ilist;  // the data field of the instances is expected to hold a FeatureSequence
 	public ArrayList<TreeSet<Integer>> docLabels = new ArrayList<TreeSet<Integer>>();//the labels of each document  
 	
+	int numLabels;
+	
 	int numTypes; //number of distinct words in dataset
 	int numTokens; //total number of words
 	public int numDocs; //number of examples
+	public int numLabelDocs;
 	
 	int numTopics; //number of topics in the given hierarchy
 		
@@ -77,6 +84,8 @@ public class LabeledHierarchicalLDA implements Serializable  {
 	double [][] test_docTopicDistribution;
 	double [] topic_thresholds;
 	
+	int test_numTokens;
+	
 	// Histograms for MLE
 	int[][] superTopicHistograms; // histogram of # of words per supertopic in documents
 	//  eg, [17][4] is # of docs with 4 words in sT 17...
@@ -108,7 +117,7 @@ public class LabeledHierarchicalLDA implements Serializable  {
 		//in the ICML PAM paper, they use a method to estiamte alpha
 		root.initTree(alphaSum);		
 		
-		numTopics = root.getTreeSize();
+		numTopics = root.getTreeSize() - 1;
 		
 		//get tree depth
 		num_tree_depth = root.getHeight() - 1;//do not count the root				
@@ -125,21 +134,66 @@ public class LabeledHierarchicalLDA implements Serializable  {
 		Arrays.fill(subAlphaSums, alphaSum);		
 	}
 	
-	public void estimate (InstanceList documents, int numIterations, int optimizeInterval, 
-	                      int showTopicsInterval,
-	                      int outputModelInterval, String outputModelFilename, int topWords,
-	                      Randoms r) throws IOException
+	/*
+	 * read document labels from the file
+	 * Important! The label set must be fully annotated (from root to the leaves).
+	 */
+	public void readLabels(String fileName) throws IOException
 	{
-		ilist = documents;
+		BufferedReader br = new BufferedReader(new FileReader(fileName));
+		String buf = "";			
+		int max_label = -1;
+		numLabelDocs = 0;
+		while((buf = br.readLine()) != null)
+		{			
+			String [] labels = buf.split(" ");
+			
+			TreeSet<Integer> t = new TreeSet<Integer>();			
+			//ignore labels[0], the document ID, lable[1], the number of labels
+			for(int j=2;j<labels.length;j++)
+			{
+				int l = Integer.parseInt(labels[j]);
+				t.add(l);
+				if(l > max_label)
+					max_label = l;				
+			}			
+			docLabels.add(t);		
+		}
+		br.close();
 		
-		//get number of words
-		numTypes = ilist.getDataAlphabet().size ();
+		//get the maximal label ID
+		numLabels = max_label + 1;
 		
+		//get number of label docs
+		numLabelDocs = docLabels.size();
+	}
+	
+	public void initData(InstanceList documents, String labelFname, Randoms r) throws IOException
+	{
+		//read text
+		ilist = documents.shallowClone();
+		numTypes = ilist.getDataAlphabet().size ();//get vocabulary size
+		numDocs = ilist.size();
 		vBeta = beta * numTypes;
 		
-		//get number of documents
-		numDocs = ilist.size();
-				
+		//get vocabulary
+		text_vocabulary = ilist.getDataAlphabet();
+		
+		//read all labels
+		readLabels(labelFname);		
+		
+		if(numDocs != numLabelDocs)
+			System.out.println("Numer of documents and number of labels do not match");
+		
+		//important!! reset the number of topics as the number of labels		
+		numTopics = numLabels;
+		
+		System.out.println("Set the total number of topics as the maximal label ID " + numTopics);		
+	}
+	
+	
+	public void initModel(int numIterations, int optimizeInterval, Randoms r) throws IOException
+{
 		//state variable to hold the topic path for each position in each document
 		topics = new int [numDocs][][];
 		
@@ -160,8 +214,6 @@ public class LabeledHierarchicalLDA implements Serializable  {
 		Arrays.fill(tokensPerTopic, 0);		
 		Arrays.fill(samplingWeights, 0);						
 		
-		long startTime = System.currentTimeMillis();
-
 		int maxTokens = 0;
 
 		//		Initialize with random assignments of tokens to topics
@@ -185,6 +237,7 @@ public class LabeledHierarchicalLDA implements Serializable  {
 			for (int si = 0; si < seqLen; si++) {
 				//Randomly sample a path
 				int [] path = root.samplingPath(r);
+				int token = fs.getIndexAtPosition(si);
 				//assign the path to the token
 				topics[di][si] = new int [num_tree_depth + 1];
 				//add path
@@ -196,7 +249,7 @@ public class LabeledHierarchicalLDA implements Serializable  {
 				{					
 					// For each topic, we also need to update the 
 					//  word type statistics
-					typeTopicCounts[fs.getIndexAtPosition(si) ][path[p]]++;
+					typeTopicCounts[token][path[p]]++;
 					tokensPerTopic[path[p]]++;	
 					//update doc topic count
 					docTopicCounts[di][path[p]]++;
@@ -212,11 +265,75 @@ public class LabeledHierarchicalLDA implements Serializable  {
 		superTopicHistograms = new int[numTopics][maxTokens + 1];
 		subTopicHistograms = new int[numTopics][numTopics][maxTokens + 1];
 		
-//		These will be initialized at the first call to 
+//				These will be initialized at the first call to 
 		clearHistograms(); //in the loop below.
 		
-		//		Finally, start the sampler!
+		//		Finally, start the sampler!		
+	}
+	
+	public void init_test (InstanceList documents, Randoms r)
+	{
+		test_ilist = documents.shallowClone();		
+		test_numDocs = test_ilist.size();								
+		
+		test_topics = new int[test_numDocs][][];
+		test_docTopicCounts = new int[test_numDocs][numTopics];
+		test_typeTopicCounts = new int[numTypes][numTopics];
+		test_tokensPerTopic = new int[numTopics];
 
+		//buffer for sampling
+		samplingWeights = new double[numTopics];
+		
+		// Initialize with random assignments of tokens to topics
+		// and finish allocating this.topics and this.tokens
+		int topic, seqLen;
+	    FeatureSequence fs;
+	    for (int di = 0; di < test_numDocs; di++) {
+	      try {
+	        fs = (FeatureSequence) test_ilist.get(di).getData();
+	      } catch (ClassCastException e) {
+	        System.err.println ("LDA and other topic models expect FeatureSequence data, not FeatureVector data.  "
+	                            +"With text2vectors, you can obtain such data with --keep-sequence or --keep-bisequence.");
+	        throw e;
+	      }
+	      seqLen = fs.getLength();
+			test_numTokens += seqLen;
+			test_topics[di] = new int[seqLen][];
+
+			// Randomly assign tokens to topics
+			//following the paper labeled-LDA, this step is exactly the same as LDA
+			for (int si = 0; si < seqLen; si++) {
+				topic = r.nextInt(numTopics);
+				int [] path = root.samplingPath(r);
+				int token = fs.getIndexAtPosition(si);
+				test_topics[di][si] = new int [num_tree_depth + 1];
+				
+				//add path
+				for(int pi=0;pi<path.length;pi++)
+					test_topics[di][si][pi] = path[pi];
+				test_topics[di][si][path.length] = -1;//add a stop sign
+				
+				//update the token count for each topic
+				for(int p=0;p<path.length;p++)
+				{					
+					// For each topic, we also need to update the 
+					//  word type statistics
+					test_typeTopicCounts[token][path[p]]++;
+					test_tokensPerTopic[path[p]]++;	
+					//update doc topic count
+					test_docTopicCounts[di][path[p]]++;
+				}											
+			}			
+		} 
+	}
+	
+	public void estimate (int numIterations, int optimizeInterval, 
+	                      int showTopicsInterval,
+	                      int outputModelInterval, int topWords, String outputModelFilename, 
+	                      Randoms r) throws IOException
+	{		
+		long startTime = System.currentTimeMillis();
+		
 		for (int iterations = 0; iterations < numIterations; iterations++) {
 			long iterationStart = System.currentTimeMillis();
 
@@ -226,7 +343,13 @@ public class LabeledHierarchicalLDA implements Serializable  {
 			// There are a few things we do on round-numbered iterations
 			//  that don't make sense if this is the first iteration.
 
+			if (showTopicsInterval != 0 && iterations % showTopicsInterval == 0 && iterations > 0) {
+				System.out.println ();
+				printTopWords (5, false);
+			}
+			
 			if (iterations > 0) {
+				/*
 				if (showTopicsInterval != 0 && iterations % showTopicsInterval == 0) {
 					System.out.println ();
 					//printTopWords (5, false);
@@ -237,12 +360,13 @@ public class LabeledHierarchicalLDA implements Serializable  {
 					pw.flush();
 					pw.close();
 				}
+				*/
 				if (outputModelInterval != 0 && iterations % outputModelInterval == 0) {
 					//this.write (new File(outputModelFilename+'.'+iterations));
 				}				
 				
 				if (optimizeInterval != 0 && iterations % optimizeInterval == 0) {
-					long optimizeTime = System.currentTimeMillis();
+					//long optimizeTime = System.currentTimeMillis();
 					
 					//update the parameter on the tree
 					///for(int k=0;k<root.numSubTopics;k++)
@@ -267,9 +391,11 @@ public class LabeledHierarchicalLDA implements Serializable  {
 				//printWordCounts();
 			}
 
-			if (iterations % 10 == 0)
-				System.out.println ("<" + iterations + "> ");
-
+			//if (iterations % 10 == 0)
+			//	System.out.println ("<" + iterations + "> ");
+			
+			if (iterations % 10 == 0) System.out.print (iterations);	else System.out.print (".");
+			
 			//System.out.print((System.currentTimeMillis() - iterationStart) + " ");
 
 			//else System.out.print (".");
@@ -285,14 +411,37 @@ public class LabeledHierarchicalLDA implements Serializable  {
 		if (hours != 0) { System.out.print(hours); System.out.print(" hours "); }
 		if (minutes != 0) { System.out.print(minutes); System.out.print(" minutes "); }
 		System.out.print(seconds); System.out.println(" seconds");
-
-		//		124.5 seconds
-		//		144.8 seconds after using FeatureSequence instead of tokens[][] array
-		//		121.6 seconds after putting "final" on FeatureSequence.getIndexAtPosition()
-		//		106.3 seconds after avoiding array lookup in inner loop with a temporary variable
-
 	}
 
+	 /* Perform several rounds of Gibbs sampling on the documents in the given range. */ 
+	public void test (int numIterations, int showTopicsInterval,	                        
+                        Randoms r)
+	{
+		long startTime = System.currentTimeMillis();
+		for (int iterations = 0; iterations < numIterations; iterations++) {
+			if (iterations % 10 == 0) System.out.print (iterations);	else System.out.print (".");
+			System.out.flush();
+			if (showTopicsInterval != 0 && iterations % showTopicsInterval == 0 && iterations > 0) {
+				System.out.println ();
+				printTopWords (5, false);
+			}
+      
+			sampleTopicsForAllTestDocs(r);
+		}
+
+		long seconds = Math.round((System.currentTimeMillis() - startTime)/1000.0);
+		long minutes = seconds / 60;	seconds %= 60;
+		long hours = minutes / 60;	minutes %= 60;
+		long days = hours / 24;	hours %= 24;
+		System.out.print ("\nTotal time: ");
+		if (days != 0) { System.out.print(days); System.out.print(" days "); }
+		if (hours != 0) { System.out.print(hours); System.out.print(" hours "); }
+		if (minutes != 0) { System.out.print(minutes); System.out.print(" minutes "); }
+		System.out.print(seconds); System.out.println(" seconds");
+	}
+	
+	 
+	/*
 	public void infer_topics (InstanceList documents, int numIterations, int optimizeInterval, 
             int showTopicsInterval,
             int outputModelInterval, String outputModelFilename, int topWords,
@@ -386,7 +535,8 @@ public class LabeledHierarchicalLDA implements Serializable  {
 				System.out.println ("<" + iterations + "> ");
 		}		
 	}
-		
+	*/
+	
 	public void learnParameterOnTree(TopicNode nd)
 	{
 		if(nd.numSubTopics != 0)
@@ -530,6 +680,24 @@ public class LabeledHierarchicalLDA implements Serializable  {
 		}
 	}
 
+	/* One iteration of Gibbs sampling, across all documents. */
+	private void sampleTopicsForAllTestDocs (Randoms r)
+	{
+		double[] topicWeights = new double[numTopics];
+		// Loop over every word in the corpus
+		for (int di = 0; di < test_numDocs; di++) {
+			
+			test_sampleTopicsForOneDoc ((FeatureSequence)test_ilist.get(di).getData(),           
+		            //testing data
+					docTopicCounts[di],
+					test_topics[di], // indexed by seq position, a sampled topic path for the position	       
+					test_docTopicCounts[di], //indexed by topic            
+		            r);
+			
+		}
+	}
+	
+	 
 	private ArrayList<Integer> getLabeledNodeUnder(TopicNode root, TreeSet<Integer> labels)
 	{
 		ArrayList<Integer> labeledNodes = new ArrayList<Integer>();
@@ -641,8 +809,102 @@ public class LabeledHierarchicalLDA implements Serializable  {
 		//	updateTopicHistogramOnTree(root.subNodes.get(i));				
 	}
 
+	private void sampleTopicsForOneTestDoc (FeatureSequence oneDocTokens,
+            int[][] topic_paths, // indexed by seq position, a sampled topic path for the position	       
+            int [] oneDocTopicCounts, //indexed by topic
+            TreeSet<Integer> oneDocTopiclabels, 
+            Randoms r) {
+	
+			//long startTime = System.currentTimeMillis();	
+			int type, subTopic;
+			double cumulativeWeight;
+			
+			int docLen = oneDocTokens.getLength();
+			
+			//Iterate over the positions (words) in the document
+			
+			for (int si = 0; si < docLen; si++) {
+				//get word at this position
+				type = oneDocTokens.getIndexAtPosition(si);
+				
+				//get topic path of this position
+				int [] path = topic_paths[si];									
+				
+				// Remove this token from all topic counts on the path
+				for(int p=0;p<path.length && path[p] != -1;p++)
+				oneDocTopicCounts[path[p]] --;
+				
+				//KDD 11 paper just samples a path directly 
+				//but now, we want to iteratively sample the topics from top level to the bottom level
+				//you can think about it as a hierarchical version of the standard LDA
+				//we keep booking every <word, topic> count
+				for(int p=0;p<path.length && path[p] != -1;p++)
+				{
+					//book the <word, super topic> count
+					typeTopicCounts[type][path[p]]--;
+					tokensPerTopic[path[p]]--;
+				}
+				
+				//
+				//we iteratively sample a path from the top level to the bottom level
+				//at each node, we sample the child node based on the probability estimation as p(t|w,d) = P(w|t)P(t|d)										
+				
+				int sampled_topic_index = 0;
+				int sampled_topic = 0;
+				int topic_in_path_index = 0;
+				//keep sampling from the root node until we see a leaf node			
+				TopicNode currentNode = root;						
+				while(currentNode.numSubTopics != 0)
+				{					
+					//get the actual nodes on this level	
+					//this is a mimic of extracting the labeled subtree
+					ArrayList<Integer> labeledTopicIndex = getLabeledNodeUnder(currentNode, oneDocTopiclabels);
+					
+					//no labeled labels available, just quit
+					if(labeledTopicIndex.size() == 0)
+					break;
+					
+					//compute the weight for the sub nodes
+					cumulativeWeight = 0.0;
+					for(int i=0;i<labeledTopicIndex.size();i++)
+					{
+						subTopic = currentNode.subNodes.get(labeledTopicIndex.get(i)).labelIndex; 												
+									
+						samplingWeights[i] = 
+						((double) oneDocTopicCounts[subTopic] + alphas[subTopic])
+						* ((double) typeTopicCounts[type][subTopic] + beta) / ((double) tokensPerTopic[subTopic] + vBeta);
+						
+						cumulativeWeight += samplingWeights[i]; 
+					}
+										
+					//sampling a sub topic index
+					sampled_topic_index = r.nextDiscreteWithSize(samplingWeights, labeledTopicIndex.size(), cumulativeWeight);
+					//get the actual topic ID
+					sampled_topic = currentNode.subNodes.get(labeledTopicIndex.get(sampled_topic_index)).labelIndex; 	 					
+					
+					//add it into path
+					topic_paths[si][topic_in_path_index] = sampled_topic;
+					topic_in_path_index++;
+					
+					//go to the next level of the tree
+					currentNode = currentNode.subNodes.get(labeledTopicIndex.get(sampled_topic_index));
+				}
+				//put a stop sign
+				topic_paths[si][topic_in_path_index] = -1;
+				
+				// Put the new topics in the path
+				for(int p=0;p<topic_in_path_index;p++)
+				{
+					oneDocTopicCounts[topic_paths[si][p]]++;						
+					typeTopicCounts[type][topic_paths[si][p]]++;
+					tokensPerTopic[topic_paths[si][p]]++;			
+				}						
+			}			
+	}
+	
 	private void test_sampleTopicsForOneDoc (FeatureSequence oneDocTokens,           
             //testing data
+			int [] oneDocTopicCounts, //indexed by topic   
             int[][] test_topic_paths, // indexed by seq position, a sampled topic path for the position	       
             int [] test_oneDocTopicCounts, //indexed by topic            
             Randoms r) {
@@ -688,7 +950,7 @@ public class LabeledHierarchicalLDA implements Serializable  {
 					//we do not need to keep the <super topic, sub topic> pair 
 					//as we are considering the hierarchy structure where each node can only have one parent topic
 					samplingWeights[i] = 
-						((double)test_oneDocTopicCounts[subTopic] + alphas[subTopic])
+						((double)oneDocTopicCounts[subTopic] + (double)test_oneDocTopicCounts[subTopic] + alphas[subTopic])
 						 * ((double) typeTopicCounts[type][subTopic] + test_typeTopicCounts[type][subTopic] + beta) / 
 						 ((double) tokensPerTopic[subTopic] + test_tokensPerTopic[subTopic] + vBeta);
 					
@@ -909,28 +1171,6 @@ public class LabeledHierarchicalLDA implements Serializable  {
 		pw.close();
 	}
 	
-	/*
-	 * read document labels from the file
-	 * Important! The label set must be fully annotated (from root to the leaves).
-	 */
-	public void readLabels(String fileName) throws IOException
-	{
-		BufferedReader br = new BufferedReader(new FileReader(fileName));
-		String buf = "";			
-		while((buf = br.readLine()) != null)
-		{			
-			String [] labels = buf.split(" ");
-			
-			TreeSet<Integer> t = new TreeSet<Integer>();			
-			//ignore labels[0], the document ID
-			for(int j=1;j<labels.length;j++)
-			{
-				t.add(Integer.parseInt(labels[j]));
-			}			
-			docLabels.add(t);
-		}
-		br.close();
-	}
 	
 	// Serialization
 
@@ -1168,6 +1408,36 @@ public class LabeledHierarchicalLDA implements Serializable  {
 		}
 	}
 	
+	 public void writeDocumentTopics (String fname, int[][][] topics, int[][] docTopicCounts, double threshold, int max) throws IOException
+	  {
+		PrintWriter pw = new PrintWriter(new FileWriter(fname));    
+	    int docLen;
+	    double topicDist[] = new double[topics.length];
+	    for (int di = 0; di < topics.length; di++) {
+	      pw.print (di); pw.print (' ');			
+	      docLen = topics[di].length;
+	      for (int ti = 0; ti < numTopics; ti++)
+	        topicDist[ti] = (((float)docTopicCounts[di][ti])/docLen);
+	      if (max < 0) max = numTopics;
+	      for (int tp = 0; tp < max; tp++) {
+	        double maxvalue = 0;
+	        int maxindex = -1;
+	        for (int ti = 0; ti < numTopics; ti++)
+	          if (topicDist[ti] > maxvalue) {
+	            maxvalue = topicDist[ti];
+	            maxindex = ti;
+	          }
+	        if (maxindex == -1 || topicDist[maxindex] < threshold)
+	          break;
+	        pw.print (maxindex+" "+topicDist[maxindex]+" ");
+	        topicDist[maxindex] = 0;
+	      }
+	      pw.println (' ');
+	    }
+	    pw.flush();
+	    pw.close();
+	  }
+	 
 	public void outputHardClassification(TopicNode root, String method, int method_parametr, int test_numDocs, String distributionsFile) throws FileNotFoundException
 	{		
 		PrintWriter out = new PrintWriter(distributionsFile);		
@@ -1209,16 +1479,19 @@ public class LabeledHierarchicalLDA implements Serializable  {
 		out.writeInt (numTypes);
 		out.writeInt (numTokens);
 		//write LDA parameters
-		out.writeDouble (alpha);
-		out.writeDouble (beta);
-		out.writeDouble (tAlpha);
+		out.writeObject (alphas);
+		out.writeDouble (beta);		
 		out.writeDouble (vBeta);
 		//write assigned topic at each word position
 		for (int di = 0; di < numDocs; di ++)
 		{
 			out.writeInt(topics[di].length);
 			for (int si = 0; si < topics[di].length; si++)
-				out.writeInt (topics[di][si]);
+			{
+				out.writeInt(topics[di][si].length);
+				for(int pi=0;pi<topics[di][si].length;pi++)
+					out.writeInt (topics[di][si][pi]);
+			}
 		}
 		//write topic count in each document
 		for (int di = 0; di < numDocs; di ++)				
@@ -1242,17 +1515,20 @@ public class LabeledHierarchicalLDA implements Serializable  {
 		numTypes = in.readInt();
 		numTokens = in.readInt();
 		//read LDA parameters
-		alpha = in.readDouble();
-		beta = in.readDouble();
-		tAlpha = in.readDouble();
+		alphas = (double [])in.readObject();
+		beta = in.readDouble();	
 		vBeta = in.readDouble();
 		//read important model parameters		
-		topics = new int[numDocs][];
+		topics = new int[numDocs][][];
 		for (int di = 0; di < numDocs; di++) {
 			int docLen = in.readInt();
-			topics[di] = new int[docLen];
+			topics[di] = new int[docLen][];
 			for (int si = 0; si < docLen; si++)
-				topics[di][si] = in.readInt();
+			{
+				int topicLen = in.readInt();
+				for(int pi=0;pi<topicLen;pi++)
+					topics[di][si][pi] = in.readInt();
+			}
 		}
 		docTopicCounts = new int[numDocs][numTopics];
 		for (int di = 0; di < numDocs; di++)
@@ -1267,9 +1543,87 @@ public class LabeledHierarchicalLDA implements Serializable  {
 			tokensPerTopic[ti] = in.readInt();				
 	}
 	
+	public void writeTopWords (String fname, int numWords, boolean useNewLines) throws IOException
+	{
+		PrintWriter pw = new PrintWriter(new FileWriter(fname));
+		
+		class WordProb implements Comparable {
+			int wi;
+			double p;
+			public WordProb (int wi, double p) { this.wi = wi; this.p = p; }
+			public final int compareTo (Object o2) {
+				if (p > ((WordProb)o2).p)
+					return -1;
+				else if (p == ((WordProb)o2).p)
+					return 0;
+				else return 1;
+			}
+		}
+
+		WordProb[] wp = new WordProb[numTypes];
+		for (int ti = 0; ti < numTopics; ti++) {
+			for (int wi = 0; wi < numTypes; wi++)
+				wp[wi] = new WordProb (wi, ((double)typeTopicCounts[wi][ti]) / tokensPerTopic[ti]);
+			Arrays.sort (wp);
+			if (useNewLines) {
+				pw.println ("Topic "+ti);
+				for (int i = 0; i < numWords; i++)
+					pw.println (ilist.getDataAlphabet().lookupObject(wp[i].wi).toString() + " " + wp[i].p);
+				pw.println("\n");
+			} else {
+				System.out.print ("Topic "+ti+": ");
+				for (int i = 0; i < numWords; i++)
+					System.out.print (text_vocabulary.lookupObject(wp[i].wi).toString() + " ");
+				pw.println();
+			}
+		}
+		
+		pw.flush();
+		pw.close();
+	}
+	
+	public void writeTopicsAtPositionInDocuments(int [][][] topics, String fname) throws IOException
+	{
+		//output topics variables
+		PrintWriter pw = new PrintWriter(new FileWriter(fname));
+		for(int di=0;di<topics.length;di++)
+		{		
+			int si = 0;
+			for(;si<topics[di].length;si++)	
+			{
+				int num_topics = 0;
+				for(int pi=0;pi<topics[di][si].length && topics[di][si][pi] != -1;pi++ )	
+					num_topics++;
+				
+				if(num_topics != 0)
+				{
+					pw.print("<");					
+					for(int pi=0;pi<num_topics-1;pi++ )					
+						pw.print(topics[di][si][pi] + " ");
+					pw.print(topics[di][si][num_topics-1] + "> ");					
+				}
+			}		
+			pw.print("\n");			
+		}
+		pw.flush();
+		pw.close();
+	}
+	
+	public void writeTextVocabulary(ObjectOutputStream out) throws IOException 
+	{
+		//write text data vocabulary
+		out.writeObject (ilist.getDataAlphabet());
+	}
+	
+	public void readTextVocabulary(ObjectInputStream in) throws IOException, ClassNotFoundException 
+	{
+		//read text vocabulary
+		text_vocabulary = (Alphabet) in.readObject ();
+	}
+	
 	public static void printOption()
 	{
-		String options = "Usage: LabeledLDA [-mode <train|test>] [-train_text <train mallet file>]"
+		String options = "Usage: LabeledLDA [-mode <train|test>] [-hier <parent child pairs>] [-train_text <train mallet file>]"
 				+ " [-train_label <train labels>] [-test_text <test text>] [-model_out_folder <folder name>] [-prediction_out_folder <folder name>]"
 				+ " [-iteration <number of iteration>] [-top_words <number of top words>]";
 	    System.err.println(options);
@@ -1282,6 +1636,7 @@ public class LabeledHierarchicalLDA implements Serializable  {
 		String mode = "";
 		String train_text_fname = "";
 		String train_label_fname = "";
+		String hier_par_child_name = "";
 		String test_text_fname = "";	
 		String model_out_folder = "";
 		String prediction_out_folder = "";
@@ -1304,6 +1659,9 @@ public class LabeledHierarchicalLDA implements Serializable  {
 		      }		      
 		      else if (args[i].equals("-train_label")) {
 		    	  train_label_fname = args[++i];
+		      }
+		      else if (args[i].equals("-hier")) {
+		    	  hier_par_child_name = args[++i];
 		      }
 		      else if (args[i].equals("-test_text")) {
 		    	  test_text_fname = args[++i];
@@ -1338,6 +1696,13 @@ public class LabeledHierarchicalLDA implements Serializable  {
 				 return;
 			}
 			
+			if(hier_par_child_name.equals(""))
+			{
+				System.err.println("<-hier> not set");
+				 printOption();
+				 return;
+			}
+			
 			model_fname = model_out_folder + "/train_model_raw_parameters.model";
 			text_vocabulary_fname = model_out_folder + "/train_model_text.vocabulary";				
 			topword_fname = model_out_folder + "/train_model_top_words.model";//top k words for a topic and its probabilities
@@ -1349,11 +1714,17 @@ public class LabeledHierarchicalLDA implements Serializable  {
 			
 			System.out.println ("Start training...");
 			
-			LabeledLDA lda = new LabeledLDA ();
+			LabeledHierarchicalLDA lda = new LabeledHierarchicalLDA ();
 			
-			lda.init (ilist, train_label_fname, new Randoms());
+			lda.initTree(hier_par_child_name);
 			
-			lda.estimate(0, ilist.size(), numIterations, 50, 0, null, new Randoms());
+			lda.initAlpha(0.1);
+			
+			lda.initData(ilist, train_label_fname, new Randoms());
+			
+			lda.initModel(numIterations, 0, new Randoms());
+			
+			lda.estimate(numIterations, 0, 50, 0, numTopWords, null, new Randoms());
 			
 			lda.writeTopWords (topword_fname, numTopWords, true);
 			
@@ -1385,6 +1756,13 @@ public class LabeledHierarchicalLDA implements Serializable  {
 				 return;
 			}
 			
+			if(hier_par_child_name.equals(""))
+			{
+				System.err.println("<-hier> not set");
+				 printOption();
+				 return;
+			}
+			
 			model_fname = model_out_folder + "/train_model_raw_parameters.model";
 			text_vocabulary_fname = model_out_folder + "/train_model_text.vocabulary";
 			test_topic_position_fname = prediction_out_folder + "/test_model_topics_position.test_model";//one MCMC chain for the topic assignment at each word
@@ -1392,8 +1770,12 @@ public class LabeledHierarchicalLDA implements Serializable  {
 			
 			InstanceList test_ilist = InstanceList.load (new File(test_text_fname));//documents
 			
-			LabeledLDA lda = new LabeledLDA ();
+			LabeledHierarchicalLDA lda = new LabeledHierarchicalLDA ();
 						
+			lda.initTree(hier_par_child_name);
+			
+			lda.initAlpha(0.1);
+			
 			//read model
 			ObjectInputStream ois = new ObjectInputStream (new FileInputStream(model_fname));
 	        lda.readModel(ois);
@@ -1407,13 +1789,18 @@ public class LabeledHierarchicalLDA implements Serializable  {
 			ois2.close();
 						
 	        //do inference on the test dataset
-	        lda.test(0, test_ilist.size(), numIterations, 50, new Randoms());
+	        lda.test(numIterations, 50, new Randoms());
 	        
 	        //write results	        				
 			lda.writeTopicsAtPositionInDocuments(lda.test_topics, test_topic_position_fname);
 			
 			//write topicd predicted for documents
 			lda.writeDocumentTopics (test_topic_document_fname, lda.test_topics, lda.test_docTopicCounts, 0.0, -1);
+		}
+		else
+		{
+			printOption();
+			 return;
 		}		
 	}
 
