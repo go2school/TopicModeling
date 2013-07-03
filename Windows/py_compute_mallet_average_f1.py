@@ -15,7 +15,7 @@ datasets = ['20_news', 'ohsumed', 'rcv1']
 #dataset = '20_news'
 #dataset = 'ohsumed'
 dataset = 'rcv1'
-for dataset in datasets:
+for dataset in datasets[:1]:
 	num_folds = 1
 	print ''
 	for th in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]:
