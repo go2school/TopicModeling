@@ -2,7 +2,7 @@
 java -jar D:/mallet-2.0.7/bin/LabeledLDA.jar -mode train -train_text E:/dataset/20news/new_dataset/5_folds/20_news_0_fold_train_text.mallet -train_label E:/dataset/20news/new_dataset/5_folds/20_news_0_fold_train_label  -model_out_folder D:/mallet-2.0.7/py_code_topic_modeling/20_news/fold_0/models -iteration 50 -top_words 100
 
 #run windows mallet test
-java -jar D:/mallet-2.0.7/bin/LabeledLDA.jar -mode test -test_text E:/dataset/20news/new_dataset/5_folds/20_news_0_fold_test_text.mallet  -model_out_folder D:/mallet-2.0.7/py_code_topic_modeling/20_news/fold_0/models -prediction_out_folder D:/mallet-2.0.7/py_code_topic_modeling/20_news/fold_0/predictions -iteration 50 -top_words 100 -use_model_init_test true
+java -jar D:/mallet-2.0.7/bin/LabeledLDA.jar -mode test -test_text E:/dataset/20news/new_dataset/5_folds/20_news_0_fold_test_text.mallet  -model_out_folder D:/mallet-2.0.7/py_code_topic_modeling/20_news/fold_0/models -prediction_out_folder D:/mallet-2.0.7/py_code_topic_modeling/20_news/fold_0/predictions -iteration 50 -top_words 100 -use_model_init_test true -show_perplexity_on_test true
 
 #compute label
 python py_compute_mallet_predicted_labels.py --infile D:/mallet-2.0.7/py_code_topic_modeling/20_news/fold_0/predictions/test_model_topic_per_document.test_model --outdir D:/mallet-2.0.7/py_code_topic_modeling/20_news/fold_0/loss --prefix predict_labels_fold_0 --true_label E:/dataset/20news/new_dataset/5_folds/20_news_0_fold_test_label
@@ -11,8 +11,12 @@ python py_compute_mallet_predicted_labels.py --infile D:/mallet-2.0.7/py_code_to
 java -jar D:/mallet-2.0.7/bin/LabeledHierarchicalLDA.jar -mode train -hier E:/dataset/20news/new_dataset/5_folds/20_news_par_child_hierarchy.txt -train_text E:/dataset/20news/new_dataset/5_folds/20_news_0_fold_train_text.mallet -train_label E:/dataset/20news/new_dataset/5_folds/20_news_0_fold_train_label  -model_out_folder D:/mallet-2.0.7/py_hierarcihcal_lda/20_news/fold_0/models -iteration 20 -top_words 100
 
 
+#standard LDA
+#run windows mallet train
+java -jar D:/mallet-2.0.7/bin/StandardLDA.jar -num_topics 20 -mode train -train_text E:/dataset/20news/new_dataset/5_folds/20_news_0_fold_train_text.mallet -model_out_folder D:/mallet-2.0.7/standrad_topic_modeling/20_news/fold_0/models -iteration 50 -top_words 100
 
-
+#run windows mallet test
+java -jar D:/mallet-2.0.7/bin/StandardLDA.jar -mode test -test_text E:/dataset/20news/new_dataset/5_folds/20_news_0_fold_test_text.mallet  -model_out_folder D:/mallet-2.0.7/standrad_topic_modeling/20_news/fold_0/models -prediction_out_folder D:/mallet-2.0.7/standrad_topic_modeling/20_news/fold_0/predictions -iteration 10 -top_words 100 -use_model_init_test true -show_perplexity_on_test true
 
 
 

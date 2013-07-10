@@ -19,26 +19,9 @@ public class lda {
 	int numTypes;
 	int numTokens;
 	
-	// indexed by <document index, sequence index>
-	// m: document index
-	// i: position index
-	//int[][] topics;
-	Hashtable<Integer, Integer>[] docPositionTopicCounts;
-	
-	// indexed by <document index, topic index>
-	// m: document index
-	// z: topic index
-	//This matrix is good enough
-	int[][] docTopicCounts; 
-	
-	// indexed by <feature index, topic index>
-	// z: topic index
-	// t: term index
-	// as term is very large, we'd better not use array
-	Hashtable<Integer, Integer>[] topicTypeCounts; 
-	
 	// indexed by <topic index>
 	int[] tokensPerTopic; 
+	int[][] docTopicCounts; // indexed by <document index, topic index>
 	
 	int [][] topics;
 	int [][] typeTopicCounts;
@@ -117,8 +100,8 @@ public class lda {
 			oldTopic = oneDocTopics[si];
 			// Remove this token from all counts
 			oneDocTopicCounts[oldTopic]--;
-			//get <topic, word> count
-			decreaseCount(topicTypeCounts[oldTopic], type);			
+			topicTypeCounts[type][oldTopic]--;
+			
 			tokensPerTopic[oldTopic]--;
 			// Build a distribution over topics for this token
 			Arrays.fill(topicWeights, 0.0);

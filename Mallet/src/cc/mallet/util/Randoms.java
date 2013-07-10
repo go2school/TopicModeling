@@ -115,7 +115,7 @@ public class Randoms extends java.util.Random {
         return i;
       }
 		}
-		return a.length-1;
+		return k-1;
 	}
 
 	/** draw a single sample from (unnormalized) multinomial "a" from the first n element, with normalizing factor "sum". */
@@ -127,7 +127,7 @@ public class Randoms extends java.util.Random {
         return i;
       }
 		}
-		return a.length-1;
+		return k-1;
 	}		
 	
   private double nextGaussian;

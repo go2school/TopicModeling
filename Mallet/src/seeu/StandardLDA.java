@@ -18,7 +18,7 @@ import cc.mallet.types.*;
 import cc.mallet.util.Randoms;
 
 /**
- * Labeled Latent Dirichlet Allocation.
+ * Latent Dirichlet Allocation.
  * @author Xiao Li
  */
 
@@ -26,7 +26,7 @@ import cc.mallet.util.Randoms;
 // (I think this means we might want to use FeatureSequence directly).
 // We will also need to support a growing vocabulary!
 
-public class LabeledLDA implements Serializable {
+public class StandardLDA implements Serializable {
 
 	int numTopics; // Number of topics to be fit
 	double alpha;  // Dirichlet(alpha,alpha,...) is the distribution over topics
@@ -36,7 +36,6 @@ public class LabeledLDA implements Serializable {
 	InstanceList ilist;  // the data field of the instances is expected to hold a FeatureSequence		
 	
 	Alphabet text_vocabulary = null;
-	Alphabet label_vocabulary = null;
 	
 	double [] topicWeights = null;
 	
@@ -49,17 +48,12 @@ public class LabeledLDA implements Serializable {
 	int numTokens;//total number of terms in all documents
 
 	int numDocs;//number of text docs
-	int numLabelDocs;//number of label instances
 	
 	int[][] docTopicCounts; // indexed by <document index, topic index>
 	int[][] typeTopicCounts; // indexed by <feature index, topic index>
 	int[] tokensPerTopic; // indexed by <topic index>	
 	
 	int [] docLength;//doc length, indexed by document index
-	
-	int [][] docLabels;//indexed by <document index, label index>		
-	int numLabels;//total number of **unique** labels	
-	int maxLabelID;//the maximal label ID
 	
 	int [] all_topics;//store all used topic index
 	//
@@ -86,79 +80,24 @@ public class LabeledLDA implements Serializable {
 	boolean isFirstTimePerplexy = true;
 	boolean show_perplexity_on_test = false;
 	
-	public LabeledLDA (int numberOfTopics)
+	public StandardLDA (int numberOfTopics)
 	{
 		this (numberOfTopics, 50.0, 0.01);
 	}
 
-	public LabeledLDA ()
+	public StandardLDA ()
 	{
 		
 	}
 	
-	public LabeledLDA (int numberOfTopics, double alphaSum, double beta)
+	public StandardLDA (int numberOfTopics, double alphaSum, double beta)
 	{
 		this.numTopics = numberOfTopics;
 		this.alpha = alphaSum / numTopics;//as same as "finding scientific topics", divied by number of topics
 		this.beta = beta;
 	}
 	
-	public void readLabels(String fname) throws IOException
-	{
-		//get number of lines
-		BufferedReader br = new BufferedReader (new FileReader(fname));
-		String line = "";
-		numLabelDocs = 0;
-		while((line = br.readLine()) != null)
-		{
-			numLabelDocs++;			
-		}
-		br.close();
-		
-		docLabels = new int [numLabelDocs][];
-		
-		TreeSet<Integer> all_labels = new TreeSet<Integer>(); 
-		//read data
-		br = new BufferedReader (new FileReader(fname));		
-		int index = 0;
-		maxLabelID = -1;
-		while((line = br.readLine()) != null)
-		{
-			String [] labels = line.split(" ");
-			int did = Integer.parseInt(labels[0]);
-			int num_label = Integer.parseInt(labels[1]);
-			
-			docLabels[index] = new int[num_label];
-			for(int i=2;i<labels.length;i++)
-			{
-				int l = Integer.parseInt(labels[i]);
-				docLabels[index][i-2] = l;
-				all_labels.add(l);
-				if(l>maxLabelID)
-					maxLabelID = l;
-			}
-			index++;
-		}
-		br.close();
-		
-		System.out.println("The labels are:");
-		Iterator<Integer> it = all_labels.iterator();
-		
-		numLabels = all_labels.size();
-		
-		//get and print all topics
-		all_topics = new int [numLabels];		
-		int ti = 0;
-		while(it.hasNext()) {
-			Integer a = it.next();
-		    System.out.print(a + " ");		
-		    all_topics[ti] = a;
-		    ti++;
-		}
-		System.out.println("\nThe maximal label is:" + maxLabelID + ". The total lable size is " + numLabels);
-	}
-	
-	public void init (InstanceList documents, String labelFname, Randoms r) throws IOException
+	public void init (InstanceList documents,  Randoms r) throws IOException
 	{
 		ilist = documents.shallowClone();
 		numTypes = ilist.getDataAlphabet().size ();//get vocabulary size
@@ -166,25 +105,12 @@ public class LabeledLDA implements Serializable {
 		
 		//get vocabulary
 		text_vocabulary = ilist.getDataAlphabet();		
-		
-		//read all labels
-		readLabels(labelFname);		
-		
-		if(numDocs != numLabelDocs)
-			System.out.println("Numer of documents and number of labels do not match");
-		
-		//important!! reset the number of topics as the maximal label ID plus 1
-		numTopics = maxLabelID + 1;
-		
-		System.out.println("Set the total number of topics as the maximal label ID " + numTopics);
-		
+				
 		topicWeights = new double[numTopics];
 		
 		//decide alpha and beta
 		//following the paper "Finding scientific topics"	
-		//alpha and beta are initlized in constructor function
-		alpha = 50.0 / numTopics;//as same as "finding scientific topics", divied by number of topics
-		beta = 0.1;
+		//alpha and beta are initlized in constructor function		
 		tAlpha = alpha * numTopics;
 		vBeta = beta * numTypes;
 		
@@ -212,13 +138,10 @@ public class LabeledLDA implements Serializable {
 	        
 			numTokens += seqLen;
 			topics[di] = new int[seqLen];
-			// Randomly assign tokens to topics
-			int num_labels = docLabels[di].length;
-			int label_index = 0;
+			// Randomly assign tokens to topics					
 			for (int si = 0; si < seqLen; si++) {								
-				//for this document, sample a label from its label set					
-				label_index = r.nextInt(num_labels);				
-				topic = docLabels[di][label_index];					
+				//for this document, sample a topic								
+				topic = r.nextInt(numTopics);				
 				//update variables
 				topics[di][si] = topic;
 				docTopicCounts[di][topic]++;
@@ -239,6 +162,10 @@ public class LabeledLDA implements Serializable {
 		test_tokensPerTopic = new int[numTopics];
 
 		topicWeights = new double [numTopics];
+		
+		all_topics = new int [numTopics];
+		for(int i=0;i<numTopics;i++)
+			all_topics[i] = i;
 		
 		// Initialize with random assignments of tokens to topics
 		// and finish allocating this.topics and this.tokens
@@ -284,59 +211,6 @@ public class LabeledLDA implements Serializable {
 		this.estimate(0, numDocs, numIterations, showTopicsInterval, outputModelInterval, outputModelFilename, r);	
 	}
 	
-	/*
-	public void addDocuments(InstanceList additionalDocuments, 
-	                         int numIterations, int showTopicsInterval,
-	                         int outputModelInterval, String outputModelFilename,
-	                         Randoms r)
-	{
-		if (ilist == null) throw new IllegalStateException ("Must already have some documents first.");
-		for (Instance inst : additionalDocuments)
-			ilist.add(inst);
-		assert (ilist.getDataAlphabet() == additionalDocuments.getDataAlphabet());
-		assert (additionalDocuments.getDataAlphabet().size() >= numTypes);
-		numTypes = additionalDocuments.getDataAlphabet().size();
-		int numNewDocs = additionalDocuments.size();
-		int numOldDocs = topics.length;
-		int numDocs = numOldDocs+ numNewDocs;
-		// Expand various arrays to make space for the new data.
-		int[][] newTopics = new int[numDocs][];
-		for (int i = 0; i < topics.length; i++) 
-			newTopics[i] = topics[i];
-
-		topics = newTopics; // The rest of this array will be initialized below.
-		int[][] newDocTopicCounts = new int[numDocs][numTopics];
-		for (int i = 0; i < docTopicCounts.length; i++)
-			newDocTopicCounts[i] = docTopicCounts[i];
-		docTopicCounts = newDocTopicCounts; // The rest of this array will be initialized below.
-		int [][] newTypeTopicCounts = new int[numTypes][numTopics];
-		for (int i = 0; i < typeTopicCounts.length; i++)
-			for (int j = 0; j < numTopics; j++)
-				newTypeTopicCounts[i][j] = typeTopicCounts[i][j]; // This array further populated below
-		
-		FeatureSequence fs;
-		for (int di = numOldDocs; di < numDocs; di++) {
-      try {
-        fs = (FeatureSequence) additionalDocuments.get(di-numOldDocs).getData();
-      } catch (ClassCastException e) {
-        System.err.println ("LDA and other topic models expect FeatureSequence data, not FeatureVector data.  "
-                            +"With text2vectors, you can obtain such data with --keep-sequence or --keep-bisequence.");
-        throw e;
-      }
-      int seqLen = fs.getLength();
-			numTokens += seqLen;
-			topics[di] = new int[seqLen];
-			// Randomly assign tokens to topics
-			for (int si = 0; si < seqLen; si++) {
-				int topic = r.nextInt(numTopics);
-				topics[di][si] = topic;
-				docTopicCounts[di][topic]++;
-				typeTopicCounts[fs.getIndexAtPosition(si)][topic]++;
-				tokensPerTopic[topic]++;
-			}
-		}
-	}
-	*/
 	
 	/* Perform several rounds of Gibbs sampling on the documents in the given range. */ 
 	public void estimate (int docIndexStart, int docIndexLength,
@@ -355,7 +229,7 @@ public class LabeledLDA implements Serializable {
       if (outputModelInterval != 0 && iterations % outputModelInterval == 0 && iterations > 0) {
         this.write (new File(outputModelFilename+'.'+iterations));
       }
-      sampleTopicsFromLabelsForDocs(docIndexStart, docIndexLength, r);
+      sampleTopicsForAllDocs(r);
       	     
 	      if(show_perplexity_on_test)
 	      {
@@ -382,7 +256,7 @@ public class LabeledLDA implements Serializable {
 	{
 		double[] topicWeights = new double[numTopics];
 		// Loop over every word in the corpus
-		for (int di = 0; di < topics.length; di++) {
+		for (int di = 0; di < numDocs; di++) {
 			sampleTopicsForOneDoc ((FeatureSequence)ilist.get(di).getData(),
 			                       topics[di], docTopicCounts[di], topicWeights, r);
 		}
@@ -399,18 +273,7 @@ public class LabeledLDA implements Serializable {
 			                       topics[di], docTopicCounts[di], topicWeights, r);
 		}
 	}
-
-	/* One iteration of Gibbs sampling, across all documents. */
-	public void sampleTopicsFromLabelsForDocs (int start, int length, Randoms r)
-	{
-		assert (start+length <= docTopicCounts.length);	
-		// Loop over every word in the corpus
-		for (int di = start; di < start+length; di++) {
-			sampleTopicsFromLabelSetForOneDoc ((FeatureSequence)ilist.get(di).getData(),
-			                       topics[di], docTopicCounts[di], docLabels[di], topicWeights, r);
-		}
-	}
-
+	
 	/* One iteration of Gibbs sampling, across all documents. */
 	public void sampleTopicsForTestDocs (int start, int length, Randoms r)
 	{
@@ -422,43 +285,6 @@ public class LabeledLDA implements Serializable {
 					docTopicCounts[di], test_topics[di], test_docTopicCounts[di], topicWeights, r);
 		}
 	}
-	
-	/*
-	public double[] assignTopics (int[] testTokens, Random r)
-	{
-		int[] testTopics = new int[testTokens.length];
-		int[] testTopicCounts = new int[numTopics];
-		int numTokens = MatrixOps.sum(testTokens);
-		double[] topicWeights = new double[numTopics];
-		// Randomly assign topics to the words and
-		// incorporate this document in the global counts
-		int topic;
-		for (int si = 0; si < testTokens.length; si++) {
-			topic = r.nextInt (numTopics);
-			testTopics[si] = topic; // analogous to this.topics
-			testTopicCounts[topic]++; // analogous to this.docTopicCounts
-			typeTopicCounts[testTokens[si]][topic]++;
-			tokensPerTopic[topic]++;
-		}
-		// Repeatedly sample topic assignments for the words in this document
-		for (int iterations = 0; iterations < numTokens*2; iterations++)
-			sampleTopicsForOneDoc (testTokens, testTopics, testTopicCounts, topicWeights, r);
-		// Remove this document from the global counts
-		// and also fill topicWeights with an unnormalized distribution over topics for whole doc
-		Arrays.fill (topicWeights, 0.0);
-		for (int si = 0; si < testTokens.length; si++) {
-			topic = testTopics[si];
-			typeTopicCounts[testTokens[si]][topic]--;
-			tokensPerTopic[topic]--;
-			topicWeights[topic]++;
-		}
-		// Normalize the distribution over topics for whole doc
-		for (int ti = 0; ti < numTopics; ti++)
-			topicWeights[ti] /= testTokens.length;
-		return topicWeights;
-	}
-*/
-
 	
 	
   private void sampleTopicsForOneDoc (FeatureSequence oneDocTokens, int[] oneDocTopics, // indexed by seq position
@@ -478,8 +304,7 @@ public class LabeledLDA implements Serializable {
 			oneDocTopicCounts[oldTopic]--;
 			typeTopicCounts[type][oldTopic]--;
 			tokensPerTopic[oldTopic]--;
-			// Build a distribution over topics for this token
-			Arrays.fill (topicWeights, 0.0);
+			// Build a distribution over topics for this token			
 			topicWeightsSum = 0;
 			currentTypeTopicCounts = typeTopicCounts[type];
 			for (int ti = 0; ti < numTopics; ti++) {
@@ -580,61 +405,6 @@ public class LabeledLDA implements Serializable {
 			//return the topic index
 			return topics[newTopicIndex];
 	  }
-	  
-	  private void sampleTopicsFromLabelSetForOneDoc (FeatureSequence oneDocTokens, 
-			  int[] oneDocTopics, // indexed by seq position
-	          int[] oneDocTopicCounts, // indexed by topic index
-	          int[] oneDocLabels, // all labels in this doc
-	          double[] topicWeights, Randoms r)
-	{
-		int[] currentTypeTopicCounts;
-		int type, oldTopic, newTopic, newTopicIndex;
-		double topicWeightsSum;
-		int docLen = oneDocTokens.getLength();
-		double tw;
-		// Iterate over the positions (words) in the document
-		for (int si = 0; si < docLen; si++) {
-			//get term type
-			type = oneDocTokens.getIndexAtPosition(si);
-			//get old assigned topic
-			oldTopic = oneDocTopics[si];
-			// Remove this token from all counts
-			oneDocTopicCounts[oldTopic]--;
-			typeTopicCounts[type][oldTopic]--;
-			tokensPerTopic[oldTopic]--;
-			
-			// Build a distribution over topics only from the training labels for this token
-			
-			topicWeightsSum = 0;
-			currentTypeTopicCounts = typeTopicCounts[type];
-			for(int li=0;li<oneDocLabels.length;li++)
-			{
-				int ti = oneDocLabels[li];
-				tw = ((currentTypeTopicCounts[ti] + beta) / (tokensPerTopic[ti] + vBeta))
-						* ((oneDocTopicCounts[ti] + alpha)); // (/docLen-1+tAlpha); is constant across all topics
-				topicWeightsSum += tw;
-				topicWeights[li] = tw;
-			}			
-			/*
-			for (int ti = 0; ti < numTopics; ti++) {
-				tw = ((currentTypeTopicCounts[ti] + beta) / (tokensPerTopic[ti] + vBeta))
-				* ((oneDocTopicCounts[ti] + alpha)); // (/docLen-1+tAlpha); is constant across all topics
-				topicWeightsSum += tw;
-				topicWeights[ti] = tw;
-			}
-			*/
-			// Sample a topic assignment from this distribution
-			newTopicIndex = r.nextDiscreteFirstK (topicWeights, oneDocLabels.length, topicWeightsSum);				
-			
-			newTopic = oneDocLabels[newTopicIndex];
-			
-			// Put that new topic into the counts
-			oneDocTopics[si] = newTopic;
-			oneDocTopicCounts[newTopic]++;
-			typeTopicCounts[type][newTopic]++;
-			tokensPerTopic[newTopic]++;
-		}
-	}
   
 	  /* Perform several rounds of Gibbs sampling on the documents in the given range. */ 
 		public void test (int docIndexStart, int docIndexLength,
@@ -695,13 +465,7 @@ public class LabeledLDA implements Serializable {
 				int ti = all_topics[li];
 				theta[di][ti] = (((double)docTopicCounts[di][ti]) + alpha)/(docLength[di] + tAlpha);
 			}
-		}	
-		
-		/*
-		 * 
-		 * tw = ((typeTopicCounts[type][ti] + currentTypeTopicCounts[ti] + beta) / (tokensPerTopic[ti] + test_tokensPerTopic[ti] + vBeta))
-				* ((oneDocTopicCounts[ti] + test_oneDocTopicCounts[ti] + alpha)); // (/docLen-1+tAlpha); is constant across all topics
-		 */
+		}				
 	}
 	
 	public void computeTestTheta()
@@ -715,7 +479,7 @@ public class LabeledLDA implements Serializable {
 			for(int li=0;li<all_topics.length;li++)
 			{
 				int ti = all_topics[li];
-				test_theta[di][ti] = (((double)test_docTopicCounts[di][ti]) + alpha)/(docLen + tAlpha);
+				test_theta[di][ti] = ((double)test_docTopicCounts[di][ti] + docTopicCounts[di][ti] + alpha)/(docLen + tAlpha);
 				
 				if(test_theta[di][ti] == 0.0)
 				{
@@ -798,15 +562,7 @@ public class LabeledLDA implements Serializable {
 					//compute theta
 					double v_theta = theta[di][ti];
 					v += v_theta * v_phi;
-				}
-				if(v == 0)
-				{
-					for(int li=0;li<all_topics.length;li++)
-					{
-						int ti = all_topics[li];//get topic
-					//	System.out.println("got " + phi[wi][ti] + " " + theta[di][ti]);
-					}
-				}
+				}			
 				twlog += Math.log(v) * occ;
 			}
 			//update 
@@ -1025,18 +781,13 @@ public class LabeledLDA implements Serializable {
 		//write count data
 		out.writeInt (numDocs);
 		out.writeInt (numTopics);
-		out.writeInt (numLabels);
-		out.writeInt (maxLabelID);
 		out.writeInt (numTypes);
 		out.writeInt (numTokens);
 		//write LDA parameters
 		out.writeDouble (alpha);
 		out.writeDouble (beta);
 		out.writeDouble (tAlpha);
-		out.writeDouble (vBeta);
-		//write all topics
-		for(int ti=0;ti<numTopics;ti++)
-			out.writeInt(all_topics[ti]);
+		out.writeDouble (vBeta);		
 		//write assigned topic at each word position
 		for (int di = 0; di < numDocs; di ++)
 		{
@@ -1064,20 +815,14 @@ public class LabeledLDA implements Serializable {
 	{				
 		//read count
 		numDocs = in.readInt();
-		numTopics = in.readInt();
-		numLabels = in.readInt();
-		maxLabelID = in.readInt();
+		numTopics = in.readInt();		
 		numTypes = in.readInt();
 		numTokens = in.readInt();
 		//read LDA parameters
 		alpha = in.readDouble();
 		beta = in.readDouble();
 		tAlpha = in.readDouble();
-		vBeta = in.readDouble();
-		//read all topics
-		all_topics = new int [numTopics];
-		for(int ti=0;ti<numTopics;ti++)
-			all_topics[ti] = in.readInt();
+		vBeta = in.readDouble();				
 		//read important model parameters		
 		topics = new int[numDocs][];
 		for (int di = 0; di < numDocs; di++) {
@@ -1115,16 +860,10 @@ public class LabeledLDA implements Serializable {
 		text_vocabulary = (Alphabet) in.readObject ();
 	}
 	
-	public void readLabelVocabulary(ObjectInputStream in) throws IOException, ClassNotFoundException 
-	{
-		//read label vocabulary
-		label_vocabulary = (Alphabet) in.readObject ();
-	}
-	
 	public static void printOption()
 	{
 		String options = "Usage: LabeledLDA [-mode <train|test>] [-train_text <train mallet file>]"
-				+ " [-train_label <train labels>] [-test_text <test text>] [-use_model_init_test <if using model parameter in testing>] [-show_perplexity_on_test <if show perplexity on test in testing>] [-model_out_folder <folder name>] [-prediction_out_folder <folder name>]"
+				+ " [-test_text <test text>] [-use_model_init_test <if using model parameter in testing>] [-show_perplexity_on_test <if show perplexity on test in testing>] [-model_out_folder <folder name>] [-prediction_out_folder <folder name>]"
 				+ " [-iteration <number of iteration>] [-top_words <number of top words>]";
 	    System.err.println(options);
 	    return ;	   
@@ -1135,7 +874,6 @@ public class LabeledLDA implements Serializable {
 	{		
 		String mode = "";
 		String train_text_fname = "";
-		String train_label_fname = "";
 		String test_text_fname = "";	
 		String model_out_folder = "";
 		String prediction_out_folder = "";
@@ -1148,6 +886,7 @@ public class LabeledLDA implements Serializable {
 		String topic_position_fname = "";		
 		String test_topic_position_fname = "";
 		String test_topic_document_fname = "";
+		int num_of_topics = 0;
 		
 		boolean using_model = false;
 		boolean show_perplexity_on_test = false;
@@ -1158,10 +897,7 @@ public class LabeledLDA implements Serializable {
 		    		mode = args[++i];
 		      }else if (args[i].equals("-train_text")) {
 		    	  train_text_fname = args[++i];
-		      }		      
-		      else if (args[i].equals("-train_label")) {
-		    	  train_label_fname = args[++i];
-		      }
+		      }		      		    
 		      else if (args[i].equals("-test_text")) {
 		    	  test_text_fname = args[++i];
 		      }
@@ -1183,11 +919,14 @@ public class LabeledLDA implements Serializable {
 		      else if (args[i].equals("-show_perplexity_on_test")) {
 		    	  show_perplexity_on_test = Boolean.parseBoolean(args[++i]);
 		      }
+		      else if (args[i].equals("-num_topics")) {
+		    	  num_of_topics = Integer.parseInt(args[++i]);
+		      }
 		    }		 		 		 						
 			
 		if(mode.equalsIgnoreCase("train"))
 		{
-			if(train_text_fname.equals("") || train_label_fname.equals(""))
+			if(train_text_fname.equals(""))
 			{
 				System.err.println("train text (<-train_text> or <-train_label>) file not set");
 				 printOption();
@@ -1197,6 +936,13 @@ public class LabeledLDA implements Serializable {
 			if(model_out_folder.equals(""))
 			{
 				 System.err.println("<-model_out_folder> not set");
+				 printOption();
+				 return;
+			}
+			
+			if(num_of_topics == 0)
+			{
+				System.err.println("<-num_topics> not set");
 				 printOption();
 				 return;
 			}
@@ -1212,11 +958,9 @@ public class LabeledLDA implements Serializable {
 			
 			System.out.println ("Start training...");
 			
-			LabeledLDA lda = new LabeledLDA ();
+			StandardLDA lda = new StandardLDA (num_of_topics);
 			
-			lda.show_perplexity_on_test = show_perplexity_on_test;
-			
-			lda.init (ilist, train_label_fname, new Randoms());
+			lda.init (ilist, new Randoms());				
 			
 			lda.estimate(0, ilist.size(), numIterations, 50, 0, null, new Randoms());
 			
@@ -1257,7 +1001,7 @@ public class LabeledLDA implements Serializable {
 			
 			InstanceList test_ilist = InstanceList.load (new File(test_text_fname));//documents
 			
-			LabeledLDA lda = new LabeledLDA ();
+			StandardLDA lda = new StandardLDA ();
 						
 			lda.show_perplexity_on_test = show_perplexity_on_test;
 			
