@@ -22,10 +22,6 @@ import cc.mallet.util.Randoms;
  * @author Xiao Li
  */
 
-// Think about support for incrementally adding more documents...
-// (I think this means we might want to use FeatureSequence directly).
-// We will also need to support a growing vocabulary!
-
 public class LabeledLDA implements Serializable {
 
 	int numTopics; // Number of topics to be fit
