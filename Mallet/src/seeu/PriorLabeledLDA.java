@@ -18,15 +18,15 @@ import cc.mallet.types.*;
 import cc.mallet.util.Randoms;
 
 /**
- * Labeled Latent Dirichlet Allocation.
+ * Prior Labeled Latent Dirichlet Allocation. from the ML Journal
  * @author Xiao Li
  */
 
-public class LabeledLDA implements Serializable {
+public class PriorLabeledLDA implements Serializable {
 
 	int numTopics; // Number of topics to be fit
-	double alpha;  // Dirichlet(alpha,alpha,...) is the distribution over topics
-	double beta;   // Prior on per-topic multinomial distribution over words
+	double alpha;  // Dirichlet(alpha,alpha,...) is the distribution over T topics
+	double beta;   // Prior on per-topic multinomial distribution over |V| words
 	double tAlpha;
 	double vBeta;
 	InstanceList ilist;  // the data field of the instances is expected to hold a FeatureSequence		
@@ -57,7 +57,17 @@ public class LabeledLDA implements Serializable {
 	int numLabels;//total number of **unique** labels	
 	int maxLabelID;//the maximal label ID
 	
-	int [] all_topics;//store all used topic index
+	int [] all_topics;//store all used topic index, indexed by <array ID>
+	
+	//
+	//variables for prior LDA
+	//counting the frequency of labels
+	//
+	int [] label_frequency;//corpora-wise label frequency, indexed by <labelID>
+	double [] label_multinominal;//corpora-wise multinominal distribution, indexed by <array ID>. used with all_topics
+	double [] label_alpha;//for estimate the alpha for each document during sampling, indexed by <labelID> 
+	double eta;//parameter for prior LDA	
+	
 	//
 	//variables for testing
 	//
@@ -82,17 +92,17 @@ public class LabeledLDA implements Serializable {
 	boolean isFirstTimePerplexy = true;
 	boolean show_perplexity_on_test = false;
 	
-	public LabeledLDA (int numberOfTopics)
+	public PriorLabeledLDA (int numberOfTopics)
 	{
 		this (numberOfTopics, 50.0, 0.01);
 	}
 
-	public LabeledLDA ()
+	public PriorLabeledLDA ()
 	{
 		
 	}
 	
-	public LabeledLDA (int numberOfTopics, double alphaSum, double beta)
+	public PriorLabeledLDA (int numberOfTopics, double alphaSum, double beta)
 	{
 		this.numTopics = numberOfTopics;
 		this.alpha = alphaSum / numTopics;//as same as "finding scientific topics", divied by number of topics
@@ -154,6 +164,38 @@ public class LabeledLDA implements Serializable {
 		System.out.println("\nThe maximal label is:" + maxLabelID + ". The total lable size is " + numLabels);
 	}
 	
+	public void estimateLabelPrior()
+	{
+		//init frequency
+		label_frequency = new int[maxLabelID +1];		
+		for(int i=0;i<maxLabelID+1;i++)
+			label_frequency[i] = 0;			
+		//accumulate label frequency
+		int sum = 0;
+		for(int i=0;i<numLabelDocs;i++)
+		{
+			for(int j=0;j<docLabels[i].length;j++)
+			{
+				int labelID = docLabels[i][j];
+				label_frequency[labelID] += 1;				
+			}
+			sum += docLabels[i].length;
+		}
+		
+		//estimate multinominal
+		label_multinominal = new double [numLabels];
+		for(int i=0;i<numLabels;i++)
+		{
+			int labelID = all_topics[i];
+			label_multinominal[i] = (double)label_frequency[labelID] / sum;			
+		}
+		
+		//init label alpha
+		label_alpha = new double [maxLabelID+1];
+		//init eta
+		eta = 50;//not important in paper		
+	}
+	
 	public void init (InstanceList documents, String labelFname, Randoms r) throws IOException
 	{
 		ilist = documents.shallowClone();
@@ -192,6 +234,10 @@ public class LabeledLDA implements Serializable {
 		tokensPerTopic = new int[numTopics];
 		docLength = new int [numDocs];
 		
+		 //init label prior
+	    //added by xiao 19072013
+	    estimateLabelPrior();
+	    
 		// Initialize with random assignments of tokens to topics
 		// and finish allocating this.topics and this.tokens
 		int topic, seqLen;
@@ -223,7 +269,7 @@ public class LabeledLDA implements Serializable {
 				typeTopicCounts[fs.getIndexAtPosition(si)][topic]++;
 				tokensPerTopic[topic]++;
 			}
-		}    	    		
+		}	    	   
 	}
 	
 	public void init_test (InstanceList documents, Randoms r, boolean using_model)
@@ -508,7 +554,15 @@ public class LabeledLDA implements Serializable {
 		double topicWeightsSum;
 		int docLen = oneDocTokens.getLength();
 		double tw;
-		// Iterate over the positions (words) in the document
+				
+		//step 0 update the hyperparameter vector \alpha^d = eta * (\theta * \phi) + \alpha
+		for(int i=0;i<maxLabelID+1;i++)
+		{
+			label_alpha[i] = eta * label_multinominal[i] + alpha; 
+		}
+		
+		// Iterate over the positions (words) in the document		
+		//step 1, update the assignment of the observed word tokens to one of the C label types
 		for (int si = 0; si < docLen; si++) {
 			type = oneDocTokens.getIndexAtPosition(si);
 			//get current assignment
@@ -524,8 +578,11 @@ public class LabeledLDA implements Serializable {
 			currentTypeTopicCounts = test_typeTopicCounts[type];
 			for (int li = 0; li < all_topics.length; li++) {
 				int ti = all_topics[li];
+				//tw = ((typeTopicCounts[type][ti] + currentTypeTopicCounts[ti] + beta) / (tokensPerTopic[ti] + test_tokensPerTopic[ti] + vBeta))
+				//* ((oneDocTopicCounts[ti] + test_oneDocTopicCounts[ti] + alpha)); // (/docLen-1+tAlpha); is constant across all topics
+				//use the Prior-alpha
 				tw = ((typeTopicCounts[type][ti] + currentTypeTopicCounts[ti] + beta) / (tokensPerTopic[ti] + test_tokensPerTopic[ti] + vBeta))
-				* ((oneDocTopicCounts[ti] + test_oneDocTopicCounts[ti] + alpha)); // (/docLen-1+tAlpha); is constant across all topics
+				* ((oneDocTopicCounts[ti] + test_oneDocTopicCounts[ti] + label_alpha[ti])); // (/docLen-1+tAlpha); is constant across all topics
 				topicWeightsSum += tw;
 				topicWeights[ti] = tw;
 			}
@@ -542,6 +599,10 @@ public class LabeledLDA implements Serializable {
 			test_typeTopicCounts[type][newTopic]++;
 			test_tokensPerTopic[newTopic]++;
 		}
+		
+		//step 2 is skipped, because of no topics
+		
+		//step 3 is skipped, because of no topics or just one topic				
 	}	 
 	  
 	  public int sampleATopic(int si,//token position 
@@ -579,6 +640,42 @@ public class LabeledLDA implements Serializable {
 			return topics[newTopicIndex];
 	  }
 	  
+	  private void reEstimateAlpha(int docLen, int[] oneDocLabels, // all labels in this doc
+	          double[] topicWeights, Randoms r)
+	  {
+		//for each label, reestimate its prior from the copors-wise multinominal
+		  //
+		  //$M_d$ = docLen
+		  //only sampling observed labels
+		  //
+		  
+		  //get prior multinominal only for the observed labels
+		  double topicWeightsSum = 0, tw = 0;
+			for(int li=0;li<oneDocLabels.length;li++)
+			{
+				int ti = oneDocLabels[li];//get the label
+				tw = label_multinominal[ti];//get the corpos-wise multinominal for this label
+				topicWeightsSum += tw;
+				topicWeights[li] = tw;
+				
+				label_alpha[ti] = 0;//clear prior
+			}
+		//sampling $M_d$ time
+		for(int i=0;i<docLen;i++)
+		{
+			int arrayIndex = r.nextDiscreteFirstK (topicWeights, oneDocLabels.length, topicWeightsSum);
+			int label = oneDocLabels[arrayIndex];
+			label_alpha[label] += eta;//plus the label weight
+		}
+		
+		//normalize
+		for(int li=0;li<oneDocLabels.length;li++)
+		{
+			int ti = oneDocLabels[li];//get the label
+			label_alpha[ti] = (double)label_alpha[ti] / docLen;//+ alpha, we do not add alpha(=0), because it is set as zero in ML 2012 paper
+		}
+	  }
+	  
 	  private void sampleTopicsFromLabelSetForOneDoc (FeatureSequence oneDocTokens, 
 			  int[] oneDocTopics, // indexed by seq position
 	          int[] oneDocTopicCounts, // indexed by topic index
@@ -590,6 +687,12 @@ public class LabeledLDA implements Serializable {
 		double topicWeightsSum;
 		int docLen = oneDocTokens.getLength();
 		double tw;
+		
+		//added by xiao 19072013
+		//before sampling each word, use prior to adjust the hyperparameter \alpha
+		//that is to say, the alpha (number of fake labels per each document is proporttional to the label multinomial)
+		reEstimateAlpha(docLen, oneDocLabels, topicWeights, r);
+				
 		// Iterate over the positions (words) in the document
 		for (int si = 0; si < docLen; si++) {
 			//get term type
@@ -608,12 +711,18 @@ public class LabeledLDA implements Serializable {
 			for(int li=0;li<oneDocLabels.length;li++)
 			{
 				int ti = oneDocLabels[li];
+				//tw = ((currentTypeTopicCounts[ti] + beta) / (tokensPerTopic[ti] + vBeta))
+				//		* ((oneDocTopicCounts[ti] + alpha)); // (/docLen-1+tAlpha); is constant across all topics
+				
+				//changed for Piror-LDA
 				tw = ((currentTypeTopicCounts[ti] + beta) / (tokensPerTopic[ti] + vBeta))
-						* ((oneDocTopicCounts[ti] + alpha)); // (/docLen-1+tAlpha); is constant across all topics
+						* ((oneDocTopicCounts[ti] + label_alpha[ti])); // (/docLen-1+tAlpha); is constant across all topics
+				
 				topicWeightsSum += tw;
 				topicWeights[li] = tw;
 			}			
 			/*
+			 * previous LDA samples on all topics
 			for (int ti = 0; ti < numTopics; ti++) {
 				tw = ((currentTypeTopicCounts[ti] + beta) / (tokensPerTopic[ti] + vBeta))
 				* ((oneDocTopicCounts[ti] + alpha)); // (/docLen-1+tAlpha); is constant across all topics
@@ -1035,7 +1144,23 @@ public class LabeledLDA implements Serializable {
 		//write all topics
 		for(int ti=0;ti<numLabels;ti++)
 			out.writeInt(all_topics[ti]);
+		//
+		//write prior information
+		//
+		//write label frequency
+		for(int i=0;i<maxLabelID+1;i++)
+			out.writeInt(label_frequency[i]);
+		//write label multinomial
+		for(int i=0;i<numLabels;i++)
+			out.writeDouble(label_multinominal[i]);
+		//write label alpha
+		for(int i=0;i<maxLabelID+1;i++)
+			out.writeDouble(label_alpha[i]);
+		//write eta
+		out.writeDouble(eta);
+		//
 		//write assigned topic at each word position
+		//
 		for (int di = 0; di < numDocs; di ++)
 		{
 			out.writeInt(topics[di].length);
@@ -1055,7 +1180,7 @@ public class LabeledLDA implements Serializable {
 			out.writeInt (tokensPerTopic[ti]);
 		//write doc length
 		for(int di=0;di<numDocs;di++)
-			out.writeInt(docLength[di]);
+			out.writeInt(docLength[di]);		
 	}	
 	
 	public void readModel(ObjectInputStream in) throws IOException, ClassNotFoundException 
@@ -1076,7 +1201,26 @@ public class LabeledLDA implements Serializable {
 		all_topics = new int [numLabels];
 		for(int ti=0;ti<numLabels;ti++)
 			all_topics[ti] = in.readInt();
-		//read important model parameters		
+		//
+		//read prior information
+		//
+		//read label frequency
+		label_frequency = new int [maxLabelID+1];
+		for(int i=0;i<maxLabelID+1;i++)
+			label_frequency[i] = in.readInt();
+		//read label multinomial
+		label_multinominal = new double [numLabels];
+		for(int i=0;i<numLabels;i++)
+			label_multinominal[i] = in.readDouble();
+		//read label alpha
+		label_alpha = new double [numLabels];
+		for(int i=0;i<maxLabelID+1;i++)
+			label_alpha[i] = in.readDouble();
+		//read eta
+		eta = in.readDouble();
+		//
+		//read important model parameters
+		//
 		topics = new int[numDocs][];
 		for (int di = 0; di < numDocs; di++) {
 			int docLen = in.readInt();
@@ -1210,7 +1354,7 @@ public class LabeledLDA implements Serializable {
 			
 			System.out.println ("Start training...");
 			
-			LabeledLDA lda = new LabeledLDA ();
+			PriorLabeledLDA lda = new PriorLabeledLDA ();
 			
 			lda.show_perplexity_on_test = show_perplexity_on_test;
 			
@@ -1255,7 +1399,7 @@ public class LabeledLDA implements Serializable {
 			
 			InstanceList test_ilist = InstanceList.load (new File(test_text_fname));//documents
 			
-			LabeledLDA lda = new LabeledLDA ();
+			PriorLabeledLDA lda = new PriorLabeledLDA ();
 						
 			lda.show_perplexity_on_test = show_perplexity_on_test;
 			
@@ -1287,5 +1431,4 @@ public class LabeledLDA implements Serializable {
 			 return;
 		}
 	}
-
 }
