@@ -99,12 +99,19 @@ public class PriorLabeledLDA implements Serializable {
 
 	public PriorLabeledLDA ()
 	{
-		
+		this.tAlpha = 50;
+	}
+	
+	public PriorLabeledLDA (double alphaSum, double beta)
+	{
+		this.tAlpha = alphaSum;
+		this.beta = beta;
 	}
 	
 	public PriorLabeledLDA (int numberOfTopics, double alphaSum, double beta)
 	{
 		this.numTopics = numberOfTopics;
+		this.tAlpha = alphaSum;
 		this.alpha = alphaSum / numTopics;//as same as "finding scientific topics", divied by number of topics
 		this.beta = beta;
 	}
@@ -223,9 +230,7 @@ public class PriorLabeledLDA implements Serializable {
 		//decide alpha and beta
 		//following the paper "Finding scientific topics"	
 		//alpha and beta are initlized in constructor function
-		alpha = 50.0 / numTopics;//as same as "finding scientific topics", divied by number of topics
-		beta = 0.1;
-		tAlpha = alpha * numTopics;
+		alpha = tAlpha / numTopics;//as same as "finding scientific topics", divied by number of topics
 		vBeta = beta * numTypes;
 		
 		topics = new int[numDocs][];
@@ -672,7 +677,7 @@ public class PriorLabeledLDA implements Serializable {
 		for(int li=0;li<oneDocLabels.length;li++)
 		{
 			int ti = oneDocLabels[li];//get the label
-			label_alpha[ti] = (double)label_alpha[ti] / docLen;//+ alpha, we do not add alpha(=0), because it is set as zero in ML 2012 paper
+			label_alpha[ti] = (double)label_alpha[ti] / docLen + alpha;
 		}
 	  }
 	  
@@ -1291,6 +1296,8 @@ public class PriorLabeledLDA implements Serializable {
 		String test_topic_position_fname = "";
 		String test_topic_document_fname = "";
 		
+		double tAlpha = 0.0;
+		double beta = 0.01;		
 		boolean using_model = false;
 		boolean show_perplexity_on_test = false;
 		
@@ -1325,6 +1332,12 @@ public class PriorLabeledLDA implements Serializable {
 		      else if (args[i].equals("-show_perplexity_on_test")) {
 		    	  show_perplexity_on_test = Boolean.parseBoolean(args[++i]);
 		      }
+		      else if (args[i].equals("-talpha")) {
+		    	  tAlpha = Double.parseDouble(args[++i]);
+		      }
+		      else if (args[i].equals("-beta")) {
+		    	  beta = Double.parseDouble(args[++i]);
+		      }
 		    }		 		 		 						
 			
 		if(mode.equalsIgnoreCase("train"))
@@ -1354,7 +1367,7 @@ public class PriorLabeledLDA implements Serializable {
 			
 			System.out.println ("Start training...");
 			
-			PriorLabeledLDA lda = new PriorLabeledLDA ();
+			PriorLabeledLDA lda = new PriorLabeledLDA (tAlpha, beta);
 			
 			lda.show_perplexity_on_test = show_perplexity_on_test;
 			
