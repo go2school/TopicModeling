@@ -18,11 +18,11 @@ import cc.mallet.types.*;
 import cc.mallet.util.Randoms;
 
 /**
- * Prior Labeled Latent Dirichlet Allocation. from the ML Journal
+ * Dependency Labeled Latent Dirichlet Allocation. from the ML Journal
  * @author Xiao Li
  */
 
-public class PriorLabeledLDA implements Serializable {
+public class DependencyLabeledLDA implements Serializable {
 
 	int numTopics; // Number of topics to be fit
 	double alpha;  // Dirichlet(alpha,alpha,...) is the distribution over T topics
@@ -68,6 +68,13 @@ public class PriorLabeledLDA implements Serializable {
 	double [] label_alpha;//for estimate the alpha for each document during sampling, indexed by <labelID> 
 	double eta;//parameter for prior LDA	
 	
+	
+	//
+	//variables for Dependency LDA
+	//counting the frequency of labels
+	//
+	SimpleLDA labelTokenLDA = null;
+		
 	//
 	//variables for testing
 	//
@@ -92,23 +99,23 @@ public class PriorLabeledLDA implements Serializable {
 	boolean isFirstTimePerplexy = true;
 	boolean show_perplexity_on_test = false;
 	
-	public PriorLabeledLDA (int numberOfTopics)
+	public DependencyLabeledLDA (int numberOfTopics)
 	{
 		this (numberOfTopics, 50.0, 0.01);
 	}
 
-	public PriorLabeledLDA ()
+	public DependencyLabeledLDA ()
 	{
 		this.tAlpha = 50;
 	}
 	
-	public PriorLabeledLDA (double alphaSum, double beta)
+	public DependencyLabeledLDA (double alphaSum, double beta)
 	{
 		this.tAlpha = alphaSum;
 		this.beta = beta;
 	}
 	
-	public PriorLabeledLDA (int numberOfTopics, double alphaSum, double beta)
+	public DependencyLabeledLDA (int numberOfTopics, double alphaSum, double beta)
 	{
 		this.numTopics = numberOfTopics;
 		this.tAlpha = alphaSum;
@@ -393,13 +400,6 @@ public class PriorLabeledLDA implements Serializable {
                         int outputModelInterval, String outputModelFilename,
                         Randoms r)
 	{
-		
-		//added by xiao 19072013
-		//before sampling, use prior to adjust the hyperparameter \alpha
-		//that is to say, the alpha (number of fake labels per each document is proporttional to the label multinomial)
-		//commented
-		//reEstimateAlpha(docLen, oneDocLabels, topicWeights, r);
-				
 		//as noted by author
 		//During training, we only compute \alpha'^(d) once for each document, at the very beginning of training.
 		for(int i=0;i<maxLabelID+1;i++)
@@ -486,43 +486,20 @@ public class PriorLabeledLDA implements Serializable {
 		}
 	}
 	
-	/*
-	public double[] assignTopics (int[] testTokens, Random r)
-	{
-		int[] testTopics = new int[testTokens.length];
-		int[] testTopicCounts = new int[numTopics];
-		int numTokens = MatrixOps.sum(testTokens);
-		double[] topicWeights = new double[numTopics];
-		// Randomly assign topics to the words and
-		// incorporate this document in the global counts
-		int topic;
-		for (int si = 0; si < testTokens.length; si++) {
-			topic = r.nextInt (numTopics);
-			testTopics[si] = topic; // analogous to this.topics
-			testTopicCounts[topic]++; // analogous to this.docTopicCounts
-			typeTopicCounts[testTokens[si]][topic]++;
-			tokensPerTopic[topic]++;
-		}
-		// Repeatedly sample topic assignments for the words in this document
-		for (int iterations = 0; iterations < numTokens*2; iterations++)
-			sampleTopicsForOneDoc (testTokens, testTopics, testTopicCounts, topicWeights, r);
-		// Remove this document from the global counts
-		// and also fill topicWeights with an unnormalized distribution over topics for whole doc
-		Arrays.fill (topicWeights, 0.0);
-		for (int si = 0; si < testTokens.length; si++) {
-			topic = testTopics[si];
-			typeTopicCounts[testTokens[si]][topic]--;
-			tokensPerTopic[topic]--;
-			topicWeights[topic]++;
-		}
-		// Normalize the distribution over topics for whole doc
-		for (int ti = 0; ti < numTopics; ti++)
-			topicWeights[ti] /= testTokens.length;
-		return topicWeights;
-	}
-*/
-
-	
+	/* One iteration of Gibbs sampling, across all label-token documents. */
+	public void sampleTopicsFromLabelTokens (int numIterations, Randoms r)
+	{		
+		//number of topics
+		//alpha sum
+		//beta
+		labelTokenLDA = new SimpleLDA(200, 50, 0.01);
+		
+		//attach the label-token data
+		labelTokenLDA.readDocs(this.docLabels);
+		
+		//train LDA model for label-topic
+		labelTokenLDA.estimate(numIterations, r);
+	}	
 	
   private void sampleTopicsForOneDoc (FeatureSequence oneDocTokens, int[] oneDocTopics, // indexed by seq position
 	                                    int[] oneDocTopicCounts, // indexed by topic index
@@ -561,7 +538,8 @@ public class PriorLabeledLDA implements Serializable {
 			tokensPerTopic[newTopic]++;
 		}
 	}
-	
+		 
+  
 	  private void sampleTopicsForOneTestDoc (FeatureSequence oneDocTokens, 			  
 	          int[] oneDocTopicCounts, // indexed by topic index
 	          int[] test_oneDocTopics, // indexed by seq position
@@ -572,7 +550,13 @@ public class PriorLabeledLDA implements Serializable {
 		int type, oldTopic, newTopicIndex, newTopic;
 		double topicWeightsSum;
 		int docLen = oneDocTokens.getLength();
-		double tw;						
+		double tw;
+				
+		//step 0 update the hyperparameter vector \alpha^d = eta * (\theta * \phi) + \alpha
+		for(int i=0;i<maxLabelID+1;i++)
+		{
+			label_alpha[i] = eta * label_multinominal[i] + alpha; 
+		}
 		
 		// Iterate over the positions (words) in the document		
 		//step 1, update the assignment of the observed word tokens to one of the C label types
@@ -617,6 +601,7 @@ public class PriorLabeledLDA implements Serializable {
 		
 		//step 3 is skipped, because of no topics or just one topic				
 	}	 
+	  
 	  
 	  public int sampleATopic(int si,//token position 
 			  int type,//token
@@ -700,7 +685,7 @@ public class PriorLabeledLDA implements Serializable {
 		double topicWeightsSum;
 		int docLen = oneDocTokens.getLength();
 		double tw;
-				
+			
 		// Iterate over the positions (words) in the document
 		for (int si = 0; si < docLen; si++) {
 			//get term type
@@ -756,13 +741,6 @@ public class PriorLabeledLDA implements Serializable {
 		                      int numIterations, int showTopicsInterval,	                        
 	                        Randoms r)
 		{
-			//step 0 update the hyperparameter vector \alpha^d = eta * (\theta * \phi) + \alpha
-			//setup alpha
-			for(int i=0;i<maxLabelID+1;i++)
-			{
-				label_alpha[i] = eta * label_multinominal[i] + alpha; 
-			}
-			
 			long startTime = System.currentTimeMillis();
 			for (int iterations = 0; iterations < numIterations; iterations++) {
 				if (iterations % 10 == 0) System.out.print (iterations);	else System.out.print (".");
@@ -1195,7 +1173,10 @@ public class PriorLabeledLDA implements Serializable {
 			out.writeInt (tokensPerTopic[ti]);
 		//write doc length
 		for(int di=0;di<numDocs;di++)
-			out.writeInt(docLength[di]);		
+			out.writeInt(docLength[di]);	
+		
+		//write the label token LDA
+		labelTokenLDA.writeModel(out);
 	}	
 	
 	public void readModel(ObjectInputStream in) throws IOException, ClassNotFoundException 
@@ -1258,6 +1239,9 @@ public class PriorLabeledLDA implements Serializable {
 		docLength = new int [numDocs];
 		for(int di=0;di<numDocs;di++)
 			docLength[di] = in.readInt();
+		
+		//read the label token LDA
+		labelTokenLDA.readModel(in);
 	}
 	
 	public void writeTextVocabulary(ObjectOutputStream out) throws IOException 
@@ -1377,13 +1361,17 @@ public class PriorLabeledLDA implements Serializable {
 			
 			System.out.println ("Start training...");
 			
-			PriorLabeledLDA lda = new PriorLabeledLDA (tAlpha, beta);
+			DependencyLabeledLDA lda = new DependencyLabeledLDA (tAlpha, beta);
 			
 			lda.show_perplexity_on_test = show_perplexity_on_test;
 			
 			lda.init (ilist, train_label_fname, new Randoms());
 			
 			lda.estimate(0, ilist.size(), numIterations, 50, 0, null, new Randoms());
+			
+			//sample standard LDA for label-topic data
+			//added by xiao on 20072013
+			lda.sampleTopicsFromLabelTokens(numIterations, new Randoms());
 			
 			lda.writeTopWords (topword_fname, numTopWords, true);
 			
@@ -1422,7 +1410,7 @@ public class PriorLabeledLDA implements Serializable {
 			
 			InstanceList test_ilist = InstanceList.load (new File(test_text_fname));//documents
 			
-			PriorLabeledLDA lda = new PriorLabeledLDA ();
+			DependencyLabeledLDA lda = new DependencyLabeledLDA ();
 						
 			lda.show_perplexity_on_test = show_perplexity_on_test;
 			
