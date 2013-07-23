@@ -74,7 +74,7 @@ public class DependencyLabeledLDA implements Serializable {
 	//counting the frequency of labels
 	//
 	SimpleLDA labelTokenLDA = null;
-		
+	int num_label_topic = 0;	
 	//
 	//variables for testing
 	//
@@ -197,11 +197,10 @@ public class DependencyLabeledLDA implements Serializable {
 		}
 		
 		//estimate multinominal
-		label_multinominal = new double [numLabels];
-		for(int i=0;i<numLabels;i++)
-		{
-			int labelID = all_topics[i];
-			label_multinominal[i] = (double)label_frequency[labelID] / sum;			
+		label_multinominal = new double [maxLabelID +1];
+		for(int i=0;i<maxLabelID +1;i++)
+		{			
+			label_multinominal[i] = (double)label_frequency[i] / sum;			
 		}
 		
 		//init label alpha
@@ -486,16 +485,57 @@ public class DependencyLabeledLDA implements Serializable {
 		}
 	}
 	
-	/* One iteration of Gibbs sampling, across all label-token documents. */
-	public void sampleTopicsFromLabelTokens (int numIterations, Randoms r)
-	{		
-		//number of topics
-		//alpha sum
-		//beta
-		labelTokenLDA = new SimpleLDA(200, 50, 0.01);
+	/* One iteration of Gibbs sampling by Dependency-LDA, across all documents. */
+	public void sampleTopicsForTestDocsWithLabelSampling (int start, int length, Randoms r)
+	{
+		assert (start+length <= test_docTopicCounts.length);
+		double[] topicWeights = new double[numTopics];
+		// Loop over every word in the corpus
+		for (int di = start; di < start+length; di++) {
+			
+			//sampling label assignment for each token
+			//In:
+			//docTopicCounts: <doc-index, topic-index>
+			//test_topics: <doc-index, token-position>
+			//test_docTopicCounts: <test-doc-index, topic-index>
+			sampleTopicsForOneTestDoc ((FeatureSequence)test_ilist.get(di).getData(),
+					docTopicCounts[di], test_topics[di], test_docTopicCounts[di], topicWeights, r);
+			
+			//samping topic assignment for each label
+			//use the sampled labels as input for the next step
+			labelTokenLDA.sampleTopicsForOneTestDoc (di, test_topics[di], r);
+			
+			//Compute the hyperparameter vector: α (d)
+			updateDocAlpha(labelTokenLDA.test_docTopicCounts[di], labelTokenLDA.test_typeTopicCounts, this.label_alpha);
+		}						
+	}
+	
+	private void updateDocAlpha(int [] docTopics, int [][] labelTopicCount, double [] label_alpha)
+	{
+		int numTopic = docTopics.length;
+		int numLabel = labelTopicCount.length;
 		
+		for(int t=0;t<numTopic;t++)
+		{
+			int v = 0;
+			int label_sum = 0;
+			for(int l=0;l<numLabel;l++)
+			{
+				v += docTopics[t] * labelTopicCount[l][t];
+				label_sum += labelTopicCount[l][t];
+			}
+			label_alpha[t] = (double)v/label_sum;
+		}
+	}
+	
+	/* One iteration of Gibbs sampling, across all label-token documents. */
+	public void sampleTopicsFromLabelTokens (int numIterations, Randoms r) throws IOException
+	{	
 		//attach the label-token data
 		labelTokenLDA.readDocs(this.docLabels);
+		
+		//init assignment
+		labelTokenLDA.init(r);
 		
 		//train LDA model for label-topic
 		labelTokenLDA.estimate(numIterations, r);
@@ -553,10 +593,6 @@ public class DependencyLabeledLDA implements Serializable {
 		double tw;
 				
 		//step 0 update the hyperparameter vector \alpha^d = eta * (\theta * \phi) + \alpha
-		for(int i=0;i<maxLabelID+1;i++)
-		{
-			label_alpha[i] = eta * label_multinominal[i] + alpha; 
-		}
 		
 		// Iterate over the positions (words) in the document		
 		//step 1, update the assignment of the observed word tokens to one of the C label types
@@ -636,43 +672,7 @@ public class DependencyLabeledLDA implements Serializable {
 			
 			//return the topic index
 			return topics[newTopicIndex];
-	  }
-	  
-	  private void reEstimateAlpha(int docLen, int[] oneDocLabels, // all labels in this doc
-	          double[] topicWeights, Randoms r)
-	  {
-		//for each label, reestimate its prior from the copors-wise multinominal
-		  //
-		  //$M_d$ = docLen
-		  //only sampling observed labels
-		  //
-		  
-		  //get prior multinominal only for the observed labels
-		  double topicWeightsSum = 0, tw = 0;
-			for(int li=0;li<oneDocLabels.length;li++)
-			{
-				int ti = oneDocLabels[li];//get the label
-				tw = label_multinominal[ti];//get the corpos-wise multinominal for this label
-				topicWeightsSum += tw;
-				topicWeights[li] = tw;
-				
-				label_alpha[ti] = 0;//clear prior
-			}
-		//sampling $M_d$ time
-		for(int i=0;i<docLen;i++)
-		{
-			int arrayIndex = r.nextDiscreteFirstK (topicWeights, oneDocLabels.length, topicWeightsSum);
-			int label = oneDocLabels[arrayIndex];
-			label_alpha[label] += eta;//plus the label weight
-		}
-		
-		//normalize
-		for(int li=0;li<oneDocLabels.length;li++)
-		{
-			int ti = oneDocLabels[li];//get the label
-			label_alpha[ti] = (double)label_alpha[ti] / docLen + alpha;
-		}
-	  }
+	  }	  
 	  
 	  private void sampleTopicsFromLabelSetForOneDoc (FeatureSequence oneDocTokens, 
 			  int[] oneDocTopics, // indexed by seq position
@@ -736,6 +736,32 @@ public class DependencyLabeledLDA implements Serializable {
 		}
 	}
   
+	  public void testWithLabelSampling (int docIndexStart, int docIndexLength, 
+			  	int numIterations, int showTopicsInterval, Randoms r)
+		{
+		  long startTime = System.currentTimeMillis();
+			for (int iterations = 0; iterations < numIterations; iterations++) {
+				if (iterations % 10 == 0) System.out.print (iterations);	else System.out.print (".");
+				System.out.flush();
+				if (showTopicsInterval != 0 && iterations % showTopicsInterval == 0 && iterations > 0) {
+					System.out.println ();
+					printTopWords (5, false);								
+				}
+	      
+				sampleTopicsForTestDocsWithLabelSampling(docIndexStart, docIndexLength, r);								
+			}
+
+			long seconds = Math.round((System.currentTimeMillis() - startTime)/1000.0);
+			long minutes = seconds / 60;	seconds %= 60;
+			long hours = minutes / 60;	minutes %= 60;
+			long days = hours / 24;	hours %= 24;
+			System.out.print ("\nTotal time: ");
+			if (days != 0) { System.out.print(days); System.out.print(" days "); }
+			if (hours != 0) { System.out.print(hours); System.out.print(" hours "); }
+			if (minutes != 0) { System.out.print(minutes); System.out.print(" minutes "); }
+			System.out.print(seconds); System.out.println(" seconds");	 
+		}
+	  
 	  /* Perform several rounds of Gibbs sampling on the documents in the given range. */ 
 		public void test (int docIndexStart, int docIndexLength,
 		                      int numIterations, int showTopicsInterval,	                        
@@ -772,6 +798,41 @@ public class DependencyLabeledLDA implements Serializable {
 			System.out.print(seconds); System.out.println(" seconds");
 		}
 		
+		public void testWithLabels (int docIndexStart, int docIndexLength,
+                int numIterations, int showTopicsInterval,	                        
+              Randoms r)
+		{
+		long startTime = System.currentTimeMillis();
+		for (int iterations = 0; iterations < numIterations; iterations++) {
+			if (iterations % 10 == 0) System.out.print (iterations);	else System.out.print (".");
+			System.out.flush();
+			if (showTopicsInterval != 0 && iterations % showTopicsInterval == 0 && iterations > 0) {
+				System.out.println ();
+				printTopWords (5, false);								
+			}
+		
+			sampleTopicsForTestDocsWithLabelSampling(docIndexStart, docIndexLength, r);
+			
+			 if(show_perplexity_on_test)
+		    {
+				 computeTestTheta();
+				  computePhi();
+			      double p = perplexity(test_ilist, phi, test_theta);
+					System.out.println("Perplexity " + p);
+		    }
+		}
+		
+		long seconds = Math.round((System.currentTimeMillis() - startTime)/1000.0);
+		long minutes = seconds / 60;	seconds %= 60;
+		long hours = minutes / 60;	minutes %= 60;
+		long days = hours / 24;	hours %= 24;
+		System.out.print ("\nTotal time: ");
+		if (days != 0) { System.out.print(days); System.out.print(" days "); }
+		if (hours != 0) { System.out.print(hours); System.out.print(" hours "); }
+		if (minutes != 0) { System.out.print(minutes); System.out.print(" minutes "); }
+		System.out.print(seconds); System.out.println(" seconds");
+		}
+				
 	public int[][] getDocTopicCounts(){
 		return docTopicCounts;
 	}
@@ -1144,7 +1205,7 @@ public class DependencyLabeledLDA implements Serializable {
 		for(int i=0;i<maxLabelID+1;i++)
 			out.writeInt(label_frequency[i]);
 		//write label multinomial
-		for(int i=0;i<numLabels;i++)
+		for(int i=0;i<maxLabelID+1;i++)
 			out.writeDouble(label_multinominal[i]);
 		//write label alpha
 		for(int i=0;i<maxLabelID+1;i++)
@@ -1173,10 +1234,7 @@ public class DependencyLabeledLDA implements Serializable {
 			out.writeInt (tokensPerTopic[ti]);
 		//write doc length
 		for(int di=0;di<numDocs;di++)
-			out.writeInt(docLength[di]);	
-		
-		//write the label token LDA
-		labelTokenLDA.writeModel(out);
+			out.writeInt(docLength[di]);			
 	}	
 	
 	public void readModel(ObjectInputStream in) throws IOException, ClassNotFoundException 
@@ -1205,11 +1263,11 @@ public class DependencyLabeledLDA implements Serializable {
 		for(int i=0;i<maxLabelID+1;i++)
 			label_frequency[i] = in.readInt();
 		//read label multinomial
-		label_multinominal = new double [numLabels];
-		for(int i=0;i<numLabels;i++)
+		label_multinominal = new double [maxLabelID+1];
+		for(int i=0;i<maxLabelID+1;i++)
 			label_multinominal[i] = in.readDouble();
 		//read label alpha
-		label_alpha = new double [numLabels];
+		label_alpha = new double [maxLabelID+1];
 		for(int i=0;i<maxLabelID+1;i++)
 			label_alpha[i] = in.readDouble();
 		//read eta
@@ -1238,10 +1296,7 @@ public class DependencyLabeledLDA implements Serializable {
 		//read doc length
 		docLength = new int [numDocs];
 		for(int di=0;di<numDocs;di++)
-			docLength[di] = in.readInt();
-		
-		//read the label token LDA
-		labelTokenLDA.readModel(in);
+			docLength[di] = in.readInt();		
 	}
 	
 	public void writeTextVocabulary(ObjectOutputStream out) throws IOException 
@@ -1264,9 +1319,9 @@ public class DependencyLabeledLDA implements Serializable {
 	
 	public static void printOption()
 	{
-		String options = "Usage: LabeledLDA [-mode <train|test>] [-train_text <train mallet file>]"
+		String options = "Usage: DependencyLabeledLDA [-mode <train|test>] [-train_text <train mallet file>]"
 				+ " [-train_label <train labels>] [-test_text <test text>] [-use_model_init_test <if using model parameter in testing>] [-show_perplexity_on_test <if show perplexity on test in testing>] [-model_out_folder <folder name>] [-prediction_out_folder <folder name>]"
-				+ " [-iteration <number of iteration>] [-top_words <number of top words>]";
+				+ " [-iteration <number of iteration>] [-top_words <number of top words>] [-num_label_topic <number of label topic>] [-talpha <talpha of model>] [-beta <beta of model>] [-label_talpha <talpha of label model>] [-label_beta <beta of label model>]";
 	    System.err.println(options);
 	    return ;	   
 	}
@@ -1284,6 +1339,7 @@ public class DependencyLabeledLDA implements Serializable {
 		int numTopWords = 20;		
 		
 		String model_fname = "";
+		String label_model_fname = "";
 		String text_vocabulary_fname = "";		
 		String topword_fname = "";
 		String topic_position_fname = "";		
@@ -1292,8 +1348,19 @@ public class DependencyLabeledLDA implements Serializable {
 		
 		double tAlpha = 0.0;
 		double beta = 0.01;		
+		double label_tAlpha = 0.0;
+		double label_beta = 0.01;		
 		boolean using_model = false;
 		boolean show_perplexity_on_test = false;
+		
+		int num_label_topic = 0;
+		
+		
+		//output command options
+		for (int i = 0; i < args.length; i++) {
+			System.out.print(args[i] + " ");
+		}
+		System.out.println("");
 		
 		// TODO Auto-generated method stub
 		    for (int i = 0; i < args.length; i++) {
@@ -1332,6 +1399,15 @@ public class DependencyLabeledLDA implements Serializable {
 		      else if (args[i].equals("-beta")) {
 		    	  beta = Double.parseDouble(args[++i]);
 		      }
+		      else if (args[i].equals("-label_talpha")) {
+		    	  label_tAlpha = Double.parseDouble(args[++i]);
+		      }
+		      else if (args[i].equals("-label_beta")) {
+		    	  label_beta = Double.parseDouble(args[++i]);
+		      }
+		      else if (args[i].equals("-num_label_topic")) {
+		    	  num_label_topic = Integer.parseInt(args[++i]);
+		      }
 		    }		 		 		 						
 			
 		if(mode.equalsIgnoreCase("train"))
@@ -1351,6 +1427,7 @@ public class DependencyLabeledLDA implements Serializable {
 			}
 			
 			model_fname = model_out_folder + "/train_model_raw_parameters.model";
+			label_model_fname = model_out_folder + "/train_label_model_raw_parameters.model";
 			text_vocabulary_fname = model_out_folder + "/train_model_text.vocabulary";				
 			topword_fname = model_out_folder + "/train_model_top_words.model";//top k words for a topic and its probabilities
 			topic_position_fname = model_out_folder + "/train_model_topics_position.model";//one MCMC chain for the topic assignment at each word
@@ -1363,10 +1440,14 @@ public class DependencyLabeledLDA implements Serializable {
 			
 			DependencyLabeledLDA lda = new DependencyLabeledLDA (tAlpha, beta);
 			
+			//create another LDA over labels
+			lda.labelTokenLDA = new SimpleLDA(num_label_topic, label_tAlpha, label_beta);
+			
 			lda.show_perplexity_on_test = show_perplexity_on_test;
 			
 			lda.init (ilist, train_label_fname, new Randoms());
 			
+			//sample labeled LDA
 			lda.estimate(0, ilist.size(), numIterations, 50, 0, null, new Randoms());
 			
 			//sample standard LDA for label-topic data
@@ -1381,6 +1462,11 @@ public class DependencyLabeledLDA implements Serializable {
 			ObjectOutputStream oos = new ObjectOutputStream (new FileOutputStream (model_fname));
 			lda.writeModel(oos);
 			oos.close();
+			
+			//write label model parameters
+			ObjectOutputStream label_oos = new ObjectOutputStream (new FileOutputStream (label_model_fname));
+			lda.labelTokenLDA.writeModel(label_oos);
+			label_oos.close();
 			
 			//write text vocabulary
 			ObjectOutputStream oos_text = new ObjectOutputStream (new FileOutputStream (text_vocabulary_fname));
@@ -1403,7 +1489,8 @@ public class DependencyLabeledLDA implements Serializable {
 				 return;
 			}
 			
-			model_fname = model_out_folder + "/train_model_raw_parameters.model";
+			model_fname = model_out_folder + "/train_model_raw_parameters.model";		
+			label_model_fname = model_out_folder + "/train_label_model_raw_parameters.model";
 			text_vocabulary_fname = model_out_folder + "/train_model_text.vocabulary";
 			test_topic_position_fname = prediction_out_folder + "/test_model_topics_position.test_model";//one MCMC chain for the topic assignment at each word
 			test_topic_document_fname =  prediction_out_folder + "/test_model_topic_per_document.test_model";//accumuate topic assignment for a document
@@ -1422,13 +1509,24 @@ public class DependencyLabeledLDA implements Serializable {
 			//read test data and initialize inference
 			lda.init_test(test_ilist, new Randoms(), using_model);
 			
+			//init label-token LDA
+			lda.labelTokenLDA = new SimpleLDA();
+			
+			//read label model
+			ObjectInputStream label_ois = new ObjectInputStream (new FileInputStream(label_model_fname));
+	        lda.labelTokenLDA.readModel(label_ois);
+	        label_ois.close();
+			
+			//initialize the label sampling LDA			
+			lda.labelTokenLDA.init_test(lda.test_topics, new Randoms(), false);
+			
 			//read text vocabulary			
 			ObjectInputStream ois2 = new ObjectInputStream (new FileInputStream(text_vocabulary_fname));
 	        lda.readTextVocabulary(ois2);
 			ois2.close();
 						
-	        //do inference on the test dataset
-	        lda.test(0, test_ilist.size(), numIterations, 50, new Randoms());
+	        //do inference on the test dataset			
+	        lda.testWithLabelSampling(0, test_ilist.size(), numIterations, 50, new Randoms());
 	        
 	        //write results	        				
 			lda.writeTopicsAtPositionInDocuments(lda.test_topics, test_topic_position_fname);

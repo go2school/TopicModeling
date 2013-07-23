@@ -218,7 +218,7 @@ public class SimpleLDA implements Serializable {
 		numTypes = all_tokens.size();		
 	}
 	
-	public void init (Randoms r) throws IOException
+	public void init (Randoms r)
 	{					
 		topicWeights = new double[numTopics];
 		
@@ -262,7 +262,7 @@ public class SimpleLDA implements Serializable {
 	{		
 		test_topics = new int[test_numDocs][];
 		test_docTopicCounts = new int[test_numDocs][numTopics];
-		test_typeTopicCounts = new int[numTypes][numTopics];
+		test_typeTopicCounts = new int[maxTokenID+1][numTopics];
 		test_tokensPerTopic = new int[numTopics];
 
 		topicWeights = new double [numTopics];				
@@ -289,6 +289,52 @@ public class SimpleLDA implements Serializable {
 				if(using_model)
 				{
 					//topic = sampleATopic(si, token, all_topics, docTopicCounts[di], topicWeights, r);
+				}
+				else
+					//we do not use smart sampling here
+					topic = r.nextInt(numTopics);
+				
+				test_topics[di][si] = topic;
+				test_docTopicCounts[di][topic]++;
+				test_typeTopicCounts[token][topic]++;
+				test_tokensPerTopic[topic]++;
+			}			
+		} 
+	}
+	
+	public void init_test (int [][] testDocs, Randoms r, boolean using_model)
+	{		
+		int num_testDocs = testDocs.length;
+		
+		test_topics = new int[num_testDocs][];
+		test_docTopicCounts = new int[num_testDocs][numTopics];
+		test_typeTopicCounts = new int[maxTokenID+1][numTopics];
+		test_tokensPerTopic = new int[numTopics];
+
+		topicWeights = new double [numTopics];				
+		
+		all_topics = new int [numTopics];
+		for(int i=0;i<numTopics;i++)
+			all_topics[i] = i;
+		
+		// Initialize with random assignments of tokens to topics
+		// and finish allocating this.topics and this.tokens
+		int topic = 0, seqLen = 0, token = 0;
+	    int [] test_doc;
+	    for (int di = 0; di < num_testDocs; di++) {
+	    	test_doc = testDocs[di];
+	        seqLen = test_doc.length;
+			test_numTokens += seqLen;
+			test_topics[di] = new int[seqLen];
+			// Randomly assign tokens to topics
+			//following the paper labeled-LDA, this step is exactly the same as LDA
+			for (int si = 0; si < seqLen; si++) {
+				
+				token = test_doc[si];
+				//use the infered parameter to estimate
+				if(using_model)
+				{
+					topic = sampleATopic(si, token, all_topics, docTopicCounts[di], topicWeights, r);
 				}
 				else
 					//we do not use smart sampling here
@@ -428,7 +474,54 @@ public class SimpleLDA implements Serializable {
 		}
 	}
 	
-	  private void sampleTopicsForOneTestDoc (int [] oneDocTokens, 			  
+  public void sampleTopicsForOneTestDoc (int di, int [] oneDocTokens, Randoms r)
+	{
+	  int[] oneDocTopicCounts = docTopicCounts[di]; // indexed by topic index
+      int[] test_oneDocTopics = test_topics[di]; // indexed by seq position
+      int[] test_oneDocTopicCounts = test_docTopicCounts[di]; // indexed by topic index
+      				
+		int[] currentTypeTopicCounts;
+		int type, oldTopic, newTopicIndex, newTopic;
+		double topicWeightsSum;
+		int docLen = oneDocTokens.length;
+		double tw;
+		// Iterate over the positions (words) in the document
+		for (int si = 0; si < docLen; si++) {
+			type = oneDocTokens[si];
+			//get current assignment
+			oldTopic = test_oneDocTopics[si];
+			// Remove this token from all counts
+			test_oneDocTopicCounts[oldTopic]--;
+			test_typeTopicCounts[type][oldTopic]--;
+			test_tokensPerTopic[oldTopic]--;
+			// Build a distribution over topics for this token
+			//this formula is from WWW 08 paper GibbasLDA
+			
+			topicWeightsSum = 0;
+			currentTypeTopicCounts = test_typeTopicCounts[type];
+			for (int li = 0; li < all_topics.length; li++) {
+				int ti = all_topics[li];
+				tw = ((typeTopicCounts[type][ti] + currentTypeTopicCounts[ti] + beta) / (tokensPerTopic[ti] + test_tokensPerTopic[ti] + vBeta))
+				* ((oneDocTopicCounts[ti] + test_oneDocTopicCounts[ti] + alpha)); // (/docLen-1+tAlpha); is constant across all topics
+				topicWeightsSum += tw;
+				topicWeights[ti] = tw;
+			}
+			// Sample a topic assignment from this distribution
+			newTopicIndex = r.nextDiscreteFirstK (topicWeights, all_topics.length, topicWeightsSum);
+			
+			newTopic = all_topics[newTopicIndex];
+			
+			// Put that new topic into the counts
+			test_oneDocTopics[si] = newTopic;
+			
+			//update all counts
+			test_oneDocTopicCounts[newTopic]++;
+			test_typeTopicCounts[type][newTopic]++;
+			test_tokensPerTopic[newTopic]++;
+		}
+	}	 
+	  
+	  public void sampleTopicsForOneTestDoc (int [] oneDocTokens, 			  
 	          int[] oneDocTopicCounts, // indexed by topic index
 	          int[] test_oneDocTopics, // indexed by seq position
 	          int[] test_oneDocTopicCounts, // indexed by topic index
@@ -873,7 +966,7 @@ public class SimpleLDA implements Serializable {
 			for (int ti = 0; ti < numTopics; ti++)
 				out.writeInt (docTopicCounts[di][ti]);		
 		//write word,topic count
-		for (int fi = 0; fi < numTypes; fi++)
+		for (int fi = 0; fi < maxTokenID+1; fi++)
 			for (int ti = 0; ti < numTopics; ti++)
 				out.writeInt (typeTopicCounts[fi][ti]);
 		//write number of tokens per topic
@@ -909,8 +1002,8 @@ public class SimpleLDA implements Serializable {
 		for (int di = 0; di < numDocs; di++)
 			for (int ti = 0; ti < numTopics; ti++)
 				docTopicCounts[di][ti] = in.readInt();		
-		typeTopicCounts = new int[numTypes][numTopics];
-		for (int fi = 0; fi < numTypes; fi++)
+		typeTopicCounts = new int[maxTokenID+1][numTopics];
+		for (int fi = 0; fi < maxTokenID+1; fi++)
 			for (int ti = 0; ti < numTopics; ti++)
 				typeTopicCounts[fi][ti] = in.readInt();
 		tokensPerTopic = new int[numTopics];
