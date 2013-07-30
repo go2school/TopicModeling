@@ -25,6 +25,7 @@ public class lda {
 	
 	int [][] topics;
 	int [][] typeTopicCounts;
+	int [][] topicTypeCounts;
 	
 	public void increaseCount(Hashtable<Integer, Integer> tb, int word_index)
 	{
