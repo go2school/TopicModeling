@@ -128,22 +128,23 @@ for line in fd:
 fd.close()
 """
 
-for th in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]:
-	in_test_label = 'D:/mallet-2.0.7/py_code_topic_modeling/20_news/fold_0/loss/predict_labels_fold_0_'+str(th)+'.txt'
-	in_true_label = 'E:/dataset/20news/new_dataset/5_folds/20_news_0_fold_test_label'
 
-	test_labels = read_label(in_test_label)
-	true_labels = read_label(in_true_label)
+#in_test_label = 'D:/mallet-2.0.7/py_code_topic_modeling/20_news/fold_0/predictions/prediction'
+in_test_label = 'D:/mallet-2.0.7/standrad_topic_modeling/20_news/fold_0/predictions/prediction'
+in_true_label = 'E:/dataset/20news/new_dataset/5_folds/20_news_0_fold_test_label'
 
-	all_labels = set()
-	for t in true_labels:
-		for tt in t:
-			all_labels.add(tt)
-	for t in test_labels:
-		for tt in t:
-			all_labels.add(tt)
-			
-	l1 = compute_label_based_f1(all_labels, true_labels, test_labels)
-	print 'Labeled based', th, l1[2], l1[5]	
-	l2 = compute_example_based_hier_f1(true_labels, test_labels)
-	print 'Example based', th, l2[2], l2[5]
+test_labels = read_label(in_test_label)
+true_labels = read_label(in_true_label)
+
+all_labels = set()
+for t in true_labels:
+	for tt in t:
+		all_labels.add(tt)
+for t in test_labels:
+	for tt in t:
+		all_labels.add(tt)
+		
+l1 = compute_label_based_f1(all_labels, true_labels, test_labels)
+print 'Labeled based', l1[2], l1[5]	
+l2 = compute_example_based_hier_f1(true_labels, test_labels)
+print 'Example based', l2[2], l2[5]
