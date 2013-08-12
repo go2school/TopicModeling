@@ -278,8 +278,7 @@ public class SVMLDATopics {
 			int [][] predicted_labels = s.testHierarchicalClassifier(allModels, topics, parent2children, maxTopicID);
 			
 			//write predicted labels
-			writePrediction(predicted_labels, outDir + "/prediction");
-			
+			writePrediction(predicted_labels, outDir + "/prediction");			
 		}
 	}
 }
