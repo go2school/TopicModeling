@@ -1,4 +1,4 @@
-package cc.mallet.topics;
+package seeu;
 
 import cc.mallet.types.*;
 import cc.mallet.util.*;
@@ -752,11 +752,6 @@ public class HierarchicalPAM {
 		return logLikelihood;
     }
 
-    public void writeModel(String fname)
-    {
-    	
-    }
-    
     public static void main (String[] args) throws IOException {
 		CommandOption.setSummary(HierarchicalPAM.class, "Train a three level hierarchy of topics");
 		CommandOption.process(HierarchicalPAM.class, args);
